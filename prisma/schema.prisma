@@ -1,0 +1,168 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "ts"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum CompanyRole {
+  OWNER
+  ADMIN
+  MANAGER
+  AGENT
+}
+
+enum TeamRole {
+  TEAM_LEAD
+  MEMBER
+}
+
+enum VisitStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model User {
+  id           String   @id @default(cuid())
+  fullName     String
+  email        String   @unique
+  passwordHash String
+  phone        String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships     CompanyMember[]
+  teamMemberships TeamMember[]
+  createdVisits   Visit[]           @relation("VisitCreator")
+  assignments     VisitAssignment[]
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members CompanyMember[]
+  teams   Team[]
+  visits  Visit[]
+}
+
+model CompanyMember {
+  id        String      @id @default(cuid())
+  companyId String
+  userId    String
+  role      CompanyRole @default(AGENT)
+  createdAt DateTime    @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId])
+  @@index([userId])
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  companyId String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  members TeamMember[]
+  visits  Visit[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model TeamMember {
+  teamId   String
+  userId   String
+  role     TeamRole @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+  @@index([userId])
+}
+
+model Visit {
+  id          String  @id @default(cuid())
+  companyId   String
+  teamId      String?
+  createdById String
+
+  clientName      String
+  clientPhone     String?
+  propertyName    String?
+  propertyAddress String
+
+  latitude  Decimal? @db.Decimal(10, 7)
+  longitude Decimal? @db.Decimal(10, 7)
+
+  scheduledAt DateTime
+  status      VisitStatus @default(SCHEDULED)
+  notes       String?     @db.Text
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  team      Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  createdBy User    @relation("VisitCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  assignments VisitAssignment[]
+
+  @@index([companyId, scheduledAt])
+  @@index([teamId, scheduledAt])
+  @@index([createdById])
+  @@index([status, scheduledAt])
+}
+
+model VisitAssignment {
+  visitId    String
+  userId     String
+  assignedAt DateTime @default(now())
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([visitId, userId])
+  @@index([userId])
+}
+
+model GoogleSheetRecord {
+  id          Int      @id @default(autoincrement())
+  serial      String?  @db.VarChar(100)
+  sourceId    String?  @db.VarChar(100)
+  team        String?  @db.VarChar(255)
+  team1       String?  @db.VarChar(255)
+  team2       String?  @db.VarChar(255)
+  team3       String?  @db.VarChar(255)
+  team4       String?  @db.VarChar(255)
+  team5       String?  @db.VarChar(255)
+  managers    String?  @db.Text
+  salesAgent  String?  @db.VarChar(255)
+  email       String?  @db.VarChar(255)
+  companyName String?  @db.VarChar(255)
+  groupName   String?  @db.VarChar(255)
+  syncedAt    DateTime @default(now()) @db.DateTime(3)
+
+  @@index([sourceId])
+  @@index([email])
+  @@index([companyName])
+  @@map("google_sheet_record")
+}
