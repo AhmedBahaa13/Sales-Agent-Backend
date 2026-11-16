@@ -2,7 +2,7 @@
 require("dotenv").config();
 
 const express = require("express");
-
+const myDataRoutes = require("./src/routes/my-data.routes");
 const authRoutes = require("./src/routes/auth.routes");
 const companyRoutes = require("./src/routes/company.routes");
 const sheetsSyncRoutes = require("./src/routes/sheets-sync.routes");
@@ -59,6 +59,7 @@ app.use(express.json({ limit: "10mb" }));
     });
 
     app.use("/api/auth", authRoutes);
+    app.use("/api/my-data", myDataRoutes);
     app.use("/api/companies", companyRoutes);
     app.use("/api/sync", sheetsSyncRoutes);
 
