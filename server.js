@@ -7,6 +7,9 @@ const authRoutes = require("./src/routes/auth.routes");
 const companyRoutes = require("./src/routes/company.routes");
 const sheetsSyncRoutes = require("./src/routes/sheets-sync.routes");
 async function startServer() {
+    if (!process.env.DB_CA) {
+    throw new Error("DB_CA is missing");
+}
     if (!process.env.DATABASE_URL) {
         throw new Error("DATABASE_URL is missing");
     }
@@ -23,10 +26,18 @@ async function startServer() {
         import("./dist/generated/prisma/client.js")
     ]);
 
-    const prisma = new PrismaClient({
-        adapter: new PrismaMariaDb(process.env.DATABASE_URL)
-    });
+ const dbUrl = new URL(process.env.DATABASE_URL);
 
+ const adapter = new PrismaMariaDb({
+    host: dbUrl.hostname,
+    port: Number(dbUrl.port || 3306),
+    user: decodeURIComponent(dbUrl.username),
+    password: decodeURIComponent(dbUrl.password),
+    database: dbUrl.pathname.slice(1),
+    ssl: { ca: process.env.DB_CA },
+    connectionLimit: 5
+    }); 
+    const prisma = new PrismaClient({ adapter });
     await prisma.$connect();
 
     console.log("Database connected successfully");
@@ -50,6 +61,31 @@ app.use(express.json({ limit: "10mb" }));
     app.use("/api/auth", authRoutes);
     app.use("/api/companies", companyRoutes);
     app.use("/api/sync", sheetsSyncRoutes);
+
+    app.get("/api/sync/google-sheet/status", async (req, res, next) => {
+    try {
+        const count = await req.prisma.googleSheetRecord.count();
+
+        const latestRecord = await req.prisma.googleSheetRecord.findFirst({
+            orderBy: {
+                syncedAt: "desc"
+            },
+            select: {
+                syncedAt: true
+            }
+        });
+
+        return res.json({
+            success: true,
+            recordsCount: count,
+            lastSyncedAt: latestRecord?.syncedAt ?? null
+        });
+
+    } catch (error) {
+        next(error);
+    }
+    });
+
     app.use((req, res) => {
         res.status(404).json({
             message: "Route not found"
