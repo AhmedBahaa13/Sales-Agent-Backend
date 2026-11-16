@@ -3,7 +3,7 @@ const express = require("express");
 
 const router = express.Router();
 
-const REQUIRED_HEADERS = [
+const SOURCE_HEADERS = [
     "Serial",
     "ID",
     "Team",
@@ -19,6 +19,13 @@ const REQUIRED_HEADERS = [
     "Group Name"
 ];
 
+const DROPDOWN_HEADERS = [
+    "ID Dropdown",
+    "Company Name",
+    "Sales Agent",
+    "Email"
+];
+
 const MAX_ROWS = 20000;
 
 function normalizeValue(value) {
@@ -31,7 +38,65 @@ function normalizeValue(value) {
     return result === "" ? null : result;
 }
 
-function mapSheetRow(row) {
+function validateSnapshot(snapshot, requiredHeaders, sheetName) {
+    if (
+        !snapshot ||
+        !Array.isArray(snapshot.headers) ||
+        !Array.isArray(snapshot.rows)
+    ) {
+        throw {
+            status: 400,
+            message: `${sheetName}: headers and rows must be arrays`
+        };
+    }
+
+    const normalizedHeaders = snapshot.headers.map(header =>
+        String(header).trim()
+    );
+
+    const missingHeaders = requiredHeaders.filter(
+        header => !normalizedHeaders.includes(header)
+    );
+
+    if (missingHeaders.length > 0) {
+        throw {
+            status: 400,
+            message: `${sheetName}: required columns are missing`,
+            missingHeaders
+        };
+    }
+
+    if (snapshot.rows.length === 0) {
+        throw {
+            status: 400,
+            message: `${sheetName}: empty snapshots are not accepted`
+        };
+    }
+
+    if (snapshot.rows.length > MAX_ROWS) {
+        throw {
+            status: 413,
+            message: `${sheetName}: maximum allowed rows: ${MAX_ROWS}`
+        };
+    }
+
+    const invalidRow = snapshot.rows.some(row =>
+        row === null ||
+        typeof row !== "object" ||
+        Array.isArray(row)
+    );
+
+    if (invalidRow) {
+        throw {
+            status: 400,
+            message: `${sheetName}: invalid row format`
+        };
+    }
+
+    return snapshot.rows;
+}
+
+function mapSourceRow(row) {
     return {
         serial: normalizeValue(row["Serial"]),
         sourceId: normalizeValue(row["ID"]),
@@ -49,6 +114,25 @@ function mapSheetRow(row) {
     };
 }
 
+function mapDropdownRow(row, index) {
+    const companyName = normalizeValue(row["Company Name"]);
+    const email = normalizeValue(row["Email"])?.toLowerCase() ?? null;
+
+    if (!companyName || !email) {
+        throw {
+            status: 400,
+            message: `Dropdown: row ${index + 1} must contain Company Name and Email`
+        };
+    }
+
+    return {
+        dropdownId: normalizeValue(row["ID Dropdown"]),
+        companyName,
+        salesAgent: normalizeValue(row["Sales Agent"]),
+        email
+    };
+}
+
 // POST /api/sync/google-sheet
 router.post("/google-sheet", async (req, res, next) => {
     try {
@@ -63,72 +147,65 @@ router.post("/google-sheet", async (req, res, next) => {
             });
         }
 
-        if (
-            !receivedSecret ||
-            receivedSecret !== configuredSecret
-        ) {
+        if (!receivedSecret || receivedSecret !== configuredSecret) {
             return res.status(401).json({
                 message: "Invalid sync credentials"
             });
         }
 
-        const { headers, rows } = req.body || {};
+        const body = req.body || {};
 
-        if (!Array.isArray(headers) || !Array.isArray(rows)) {
-            return res.status(400).json({
-                message: "Headers and rows must be arrays"
-            });
-        }
+        // New format: { source: {...}, dropdown: {...} }
+        // Legacy format: { headers: [...], rows: [...] }
+        const legacyMode = !body.source && !body.dropdown;
 
-        const normalizedHeaders = headers.map(header =>
-            String(header).trim()
+        const sourceSnapshot = legacyMode
+            ? { headers: body.headers, rows: body.rows }
+            : body.source;
+
+        const sourceRows = validateSnapshot(
+            sourceSnapshot,
+            SOURCE_HEADERS,
+            "Source"
         );
 
-        const missingHeaders = REQUIRED_HEADERS.filter(
-            header => !normalizedHeaders.includes(header)
-        );
+        const sourceRecords = sourceRows.map(mapSourceRow);
 
-        if (missingHeaders.length > 0) {
-            return res.status(400).json({
-                message: "Required columns are missing",
-                missingHeaders
-            });
+        let dropdownRecords = null;
+
+        if (!legacyMode) {
+            const dropdownRows = validateSnapshot(
+                body.dropdown,
+                DROPDOWN_HEADERS,
+                "Dropdown"
+            );
+
+            dropdownRecords = dropdownRows.map(mapDropdownRow);
         }
 
-        if (rows.length === 0) {
-            return res.status(400).json({
-                message: "Empty snapshots are not accepted"
-            });
-        }
-
-        if (rows.length > MAX_ROWS) {
-            return res.status(413).json({
-                message: `Maximum allowed rows: ${MAX_ROWS}`
-            });
-        }
-
-        if (!rows.every(row =>
-            row !== null &&
-            typeof row === "object" &&
-            !Array.isArray(row)
-        )) {
-            return res.status(400).json({
-                message: "Invalid row format"
-            });
-        }
-
-        const records = rows.map(mapSheetRow);
-
-        // Keep the old snapshot if the new snapshot cannot be saved.
+        // Both tables are updated atomically in the new format.
         const result = await req.prisma.$transaction(
             async (tx) => {
                 await tx.googleSheetRecord.deleteMany();
 
-                const inserted = await tx.googleSheetRecord.createMany({
-                    data: records
+                const sourceInserted = await tx.googleSheetRecord.createMany({
+                    data: sourceRecords
                 });
 
-                return inserted.count;
+                let dropdownInserted = null;
+
+                if (dropdownRecords !== null) {
+                    await tx.companyDropdown.deleteMany();
+
+                    dropdownInserted = await tx.companyDropdown.createMany({
+                        data: dropdownRecords
+                    });
+                }
+
+                return {
+                    sourceCount: sourceInserted.count,
+                    dropdownCount: dropdownInserted?.count ?? null
+                };
             },
             {
                 maxWait: 10000,
@@ -137,17 +214,29 @@ router.post("/google-sheet", async (req, res, next) => {
         );
 
         console.log(
-            `Google Sheets sync completed: ${result} records`
+            `Google Sheets sync completed: Source=${result.sourceCount}, Dropdown=${result.dropdownCount ?? "not updated"}`
         );
 
         return res.json({
             success: true,
-            message: "Google Sheets synchronized successfully",
-            count: result,
+            message: legacyMode
+                ? "Source synchronized successfully"
+                : "Source and Dropdown synchronized successfully",
+            sourceCount: result.sourceCount,
+            dropdownCount: result.dropdownCount,
             syncedAt: new Date().toISOString()
         });
 
     } catch (error) {
+        if (error.status) {
+            return res.status(error.status).json({
+                message: error.message,
+                ...(error.missingHeaders
+                    ? { missingHeaders: error.missingHeaders }
+                    : {})
+            });
+        }
+
         console.error("Google Sheets sync failed:", error);
         next(error);
     }

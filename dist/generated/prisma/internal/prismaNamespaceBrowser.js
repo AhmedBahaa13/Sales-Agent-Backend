@@ -46,7 +46,8 @@ export const ModelName = {
     TeamMember: 'TeamMember',
     Visit: 'Visit',
     VisitAssignment: 'VisitAssignment',
-    GoogleSheetRecord: 'GoogleSheetRecord'
+    GoogleSheetRecord: 'GoogleSheetRecord',
+    CompanyDropdown: 'CompanyDropdown'
 };
 /*
  * Enums
@@ -133,6 +134,14 @@ export const GoogleSheetRecordScalarFieldEnum = {
     groupName: 'groupName',
     syncedAt: 'syncedAt'
 };
+export const CompanyDropdownScalarFieldEnum = {
+    id: 'id',
+    dropdownId: 'dropdownId',
+    companyName: 'companyName',
+    salesAgent: 'salesAgent',
+    email: 'email',
+    syncedAt: 'syncedAt'
+};
 export const SortOrder = {
     asc: 'asc',
     desc: 'desc'
@@ -195,4 +204,10 @@ export const GoogleSheetRecordOrderByRelevanceFieldEnum = {
     email: 'email',
     companyName: 'companyName',
     groupName: 'groupName'
+};
+export const CompanyDropdownOrderByRelevanceFieldEnum = {
+    dropdownId: 'dropdownId',
+    companyName: 'companyName',
+    salesAgent: 'salesAgent',
+    email: 'email'
 };

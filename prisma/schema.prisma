@@ -166,3 +166,17 @@ model GoogleSheetRecord {
   @@index([companyName])
   @@map("google_sheet_record")
 }
+
+model CompanyDropdown {
+  id          Int      @id @default(autoincrement())
+  dropdownId  String?  @db.VarChar(100)
+  companyName String   @db.VarChar(255)
+  salesAgent  String?  @db.VarChar(255)
+  email       String   @db.VarChar(255)
+  syncedAt    DateTime @default(now()) @db.DateTime(3)
+
+  @@index([dropdownId])
+  @@index([email])
+  @@index([companyName])
+  @@map("company_dropdown")
+}
