@@ -366,43 +366,69 @@ router.get("/overview", async (req, res, next) => {
         if (!user || !user.isActive) {
             return res.status(401).json({ message: "User not found or inactive" });
         }
+        const isAdmin = isAdminEmail(user.email);
 
         const requestedPeriod = String(req.query.period || "all");
         const period = PERIODS.has(requestedPeriod) ? requestedPeriod : "30d";
         const startDate = getPeriodStart(period);
         const requestedCompanyId = clean(req.query.companyId);
 
-        const memberships = await req.prisma.companyMember.findMany({
-            where: {
-                userId: user.id,
-                company: { isActive: true }
-            },
-            orderBy: { createdAt: "asc" },
-            include: {
-                company: {
-                    include: {
-                        _count: { select: { members: true, teams: true, visits: true } },
-                        members: {
-                            orderBy: { createdAt: "asc" },
-                            include: {
-                                user: { select: { id: true, fullName: true, email: true, isActive: true } }
+        const memberships = isAdmin
+            ? (await req.prisma.company.findMany({
+                where: { isActive: true },
+                orderBy: { name: "asc" },
+                include: {
+                    _count: { select: { members: true, teams: true, visits: true } },
+                    members: {
+                        orderBy: { createdAt: "asc" },
+                        include: {
+                            user: { select: { id: true, fullName: true, email: true, isActive: true } }
+                        }
+                    },
+                    teams: {
+                        orderBy: { name: "asc" },
+                        include: {
+                            _count: { select: { members: true, visits: true } },
+                            members: {
+                                include: {
+                                    user: { select: { id: true, fullName: true, email: true, isActive: true } }
+                                }
                             }
-                        },
-                        teams: {
-                            orderBy: { name: "asc" },
-                            include: {
-                                _count: { select: { members: true, visits: true } },
-                                members: {
-                                    include: {
-                                        user: { select: { id: true, fullName: true, email: true, isActive: true } }
+                        }
+                    }
+                }
+            })).map(company => ({ companyId: company.id, role: "ADMIN", company }))
+            : await req.prisma.companyMember.findMany({
+                where: {
+                    userId: user.id,
+                    company: { isActive: true }
+                },
+                orderBy: { createdAt: "asc" },
+                include: {
+                    company: {
+                        include: {
+                            _count: { select: { members: true, teams: true, visits: true } },
+                            members: {
+                                orderBy: { createdAt: "asc" },
+                                include: {
+                                    user: { select: { id: true, fullName: true, email: true, isActive: true } }
+                                }
+                            },
+                            teams: {
+                                orderBy: { name: "asc" },
+                                include: {
+                                    _count: { select: { members: true, visits: true } },
+                                    members: {
+                                        include: {
+                                            user: { select: { id: true, fullName: true, email: true, isActive: true } }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            }
-        });
+            });
 
         const companyIds = memberships.map(item => item.companyId);
         if (requestedCompanyId && !companyIds.includes(requestedCompanyId)) {
@@ -418,13 +444,13 @@ router.get("/overview", async (req, res, next) => {
             ...(startDate ? { scheduledAt: { gte: startDate } } : {})
         };
         const userEmail = user.email.trim().toLowerCase();
-        const sheetWhere = {
+        const sheetWhere = isAdmin ? {} : {
             OR: [
                 { email: userEmail },
                 { salesAgent: { equals: user.fullName } }
             ]
         };
-        const dropdownWhere = {
+        const dropdownWhere = isAdmin ? {} : {
             OR: [
                 { email: userEmail },
                 { salesAgent: { equals: user.fullName } }
@@ -473,13 +499,16 @@ router.get("/overview", async (req, res, next) => {
                 orderBy: { syncedAt: "desc" },
                 select: { syncedAt: true }
             }),
-            fetchOrientationRecords(user.email, user.fullName)
+            fetchOrientationRecords(user.email, user.fullName, isAdmin)
         ]);
 
         const allOrientations = orientationResult.records;
         const orientationRows = allOrientations
             .filter(row => !startDate || (row.parsedDate && row.parsedDate >= startDate))
             .sort((a, b) => (b.parsedDate?.getTime() || 0) - (a.parsedDate?.getTime() || 0));
+        const managerHierarchy = isAdmin
+            ? buildManagerVisitHierarchy(orientationRows, sourceRecords)
+            : null;
 
 
         const companies = memberships.map(membership => ({
@@ -644,7 +673,7 @@ router.get("/overview", async (req, res, next) => {
             success: true,
             generatedAt: new Date().toISOString(),
             period,
-            user: { id: user.id, fullName: user.fullName, email: user.email },
+            user: { id: user.id, fullName: user.fullName, email: user.email, role: isAdmin ? "ADMIN" : "USER" },
             scope: {
                 companyIds,
                 visitsTotal: visitsTotal + allOrientations.length,
@@ -653,7 +682,9 @@ router.get("/overview", async (req, res, next) => {
                 visitsReturned: visits.length + orientationRows.length,
                 appVisitsReturned: visits.length,
                 orientationVisitsReturned: orientationRows.length,
-                sourceRecordsScope: "Authenticated user's email or Sales Agent name",
+                role: isAdmin ? "ADMIN" : "USER",
+                dataScope: isAdmin ? "ALL" : "USER",
+                sourceRecordsScope: isAdmin ? "All Google Sheets records (Global Admin)" : "Authenticated user's email or Sales Agent name",
                 sourceRecordsCount: sourceRecords.length
             },
             summary: {
@@ -707,6 +738,7 @@ router.get("/overview", async (req, res, next) => {
             companies,
             teams,
             companyMembers,
+            managerHierarchy,
             orientationVisits: orientationRows.map((row, index) => ({
                 id: row.serial || "orientation-" + index,
                 serial: row.serial,
@@ -730,6 +762,7 @@ router.get("/overview", async (req, res, next) => {
             recentVisits: recentOrientationVisits.length ? recentOrientationVisits : recentDatabaseVisits,
             orientationSource: {
                 status: orientationResult.error ? "error" : "connected",
+                scope: isAdmin ? "ALL" : "USER",
                 recordsReturned: allOrientations.length,
                 recordsInPeriod: orientationRows.length,
                 fetchedAt: orientationResult.fetchedAt,
