@@ -211,6 +211,17 @@ function buildManagerVisitHierarchy(orientationRows, sourceRecords) {
         return team.agents.get(id);
     };
 
+    const agentsWithManager = new Set([
+        ...sourceRecords
+            .filter(source => clean(source.managers))
+            .map(source => key(source.salesAgent))
+            .filter(Boolean),
+        ...orientationRows
+            .filter(row => clean(row.salesManager))
+            .map(row => key(row.salesAgent))
+            .filter(Boolean)
+    ]);
+
     for (const source of sourceRecords) {
         const sourceId = key(source.sourceId);
         if (sourceId) {
@@ -236,7 +247,7 @@ function buildManagerVisitHierarchy(orientationRows, sourceRecords) {
             for (const teamName of teams) {
                 ensureAgentInTeam(ensureTeam(manager, teamName), agentName);
             }
-        } else {
+        } else if (!agentsWithManager.has(key(agentName))) {
             const agent = ensureOrphanAgent(agentName);
             for (const teamName of teams) ensureTeam(agent, teamName);
         }
@@ -246,19 +257,29 @@ function buildManagerVisitHierarchy(orientationRows, sourceRecords) {
         const byId = key(visit.projectId)
             ? (sourceById.get(key(visit.projectId)) || [])
             : [];
+        const byAgent = key(visit.salesAgent)
+            ? (sourceByAgent.get(key(visit.salesAgent)) || [])
+            : [];
         const sameIdAgentCompany = byId.find(source =>
             (!visit.salesAgent || key(source.salesAgent) === key(visit.salesAgent)) &&
             (!visit.companyName || key(source.companyName) === key(visit.companyName))
         );
-        if (sameIdAgentCompany) return sameIdAgentCompany;
+        if (sameIdAgentCompany && clean(sameIdAgentCompany.managers)) return sameIdAgentCompany;
 
-        const byAgent = key(visit.salesAgent)
-            ? (sourceByAgent.get(key(visit.salesAgent)) || [])
-            : [];
+        const sameIdWithManager = byId.find(source => clean(source.managers));
+        if (sameIdWithManager) return sameIdWithManager;
+
+        const sameAgentCompanyWithManager = byAgent.find(source =>
+            clean(source.managers) &&
+            (!visit.companyName || key(source.companyName) === key(visit.companyName))
+        );
+        const anyAgentWithManager = byAgent.find(source => clean(source.managers));
         const sameAgentCompany = byAgent.find(source =>
             !visit.companyName || key(source.companyName) === key(visit.companyName)
         );
-        return byId[0] || sameAgentCompany || byAgent[0] || null;
+        return sameIdAgentCompany || sameIdWithManager ||
+            sameAgentCompanyWithManager || anyAgentWithManager ||
+            byId[0] || sameAgentCompany || byAgent[0] || null;
     }
 
     for (let index = 0; index < orientationRows.length; index += 1) {
@@ -347,7 +368,8 @@ function buildManagerVisitHierarchy(orientationRows, sourceRecords) {
         unassignedVisits,
         summary: {
             managers: serializedManagers.length,
-            teams: serializedManagers.reduce((total, manager) => total + manager.teams.length, 0),
+            teams: serializedManagers.reduce((total, manager) => total + manager.teams.length, 0) +
+                serializedOrphans.reduce((total, agent) => total + agent.teams.length, 0),
             unassignedAgents: serializedOrphans.length,
             visits: orientationRows.length,
             unassignedVisits: unassignedVisits.length
