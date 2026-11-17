@@ -59,6 +59,7 @@ const adapter = new PrismaMariaDb({
     const app = express();
 
 app.use(express.json({ limit: "10mb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
     app.use((req, res, next) => {
         req.prisma = prisma;
