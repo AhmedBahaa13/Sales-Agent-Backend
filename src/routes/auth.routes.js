@@ -2,6 +2,7 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { isAdminEmail } = require("../utils/admin-access");
 
 const {
     authenticateToken
@@ -177,7 +178,8 @@ router.post("/login", async (req, res, next) => {
                 id: user.id,
                 fullName: user.fullName,
                 email: user.email,
-                phone: user.phone
+                phone: user.phone,
+                role: isAdminEmail(user.email) ? "ADMIN" : "USER"
             }
         });
 
@@ -213,7 +215,10 @@ router.get("/me", authenticateToken, async (req, res, next) => {
         }
 
         return res.json({
-            user
+            user: {
+                ...user,
+                role: isAdminEmail(user.email) ? "ADMIN" : "USER"
+            }
         });
 
     } catch (error) {
