@@ -62,6 +62,110 @@ function monthKey(date) {
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
 }
 
+const ORIENTATIONS_API_URL = process.env.ORIENTATIONS_API_URL ||
+    "https://script.google.com/macros/s/AKfycbwJwiTyjuXOPh_mMPpl5NbKdTgI0ZQwVAgk7l4tT-nPkqdiU0-WOOtQDOXeOMsGywxP/exec";
+
+function firstValue(row, ...names) {
+    for (const name of names) {
+        if (row[name] !== undefined && row[name] !== null) return row[name];
+    }
+    return null;
+}
+
+function parseOrientationDate(value) {
+    const raw = clean(value);
+    if (!raw) return null;
+
+    const dmy = raw.match(/^(\\d{1,2})[\\/. -](\\d{1,2})[\\/. -](\\d{4})(?:\\s+(.*))?$/);
+    if (dmy) {
+        const parsed = new Date(
+            Number(dmy[3]),
+            Number(dmy[2]) - 1,
+            Number(dmy[1])
+        );
+        if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeOrientationRow(row) {
+    const date = clean(firstValue(row, "Date", "date"));
+    const parsedDate = parseOrientationDate(date);
+    return {
+        serial: clean(firstValue(row, "Serial", "serial")) || "",
+        projectId: clean(firstValue(row, "ID", "id")) || "",
+        email: clean(firstValue(row, "Email", "email")) || "",
+        date: date || "",
+        parsedDate,
+        timeIn: clean(firstValue(row, "Time in", "Time In", "timeIn")) || "",
+        locationIn: clean(firstValue(row, "Location in", "Location In", "locationIn")) || "",
+        brokerType: clean(firstValue(row, "Broker Type", "brokerType")) || "",
+        newCompanyName: clean(firstValue(row, "New Company Name", "newCompanyName")) || "",
+        brokerAdmin: clean(firstValue(row, "Broker Admin", "brokerAdmin")) || "",
+        requestNumber: clean(firstValue(row, "Request Number", "requestNumber")) || "",
+        companyName: clean(firstValue(row, "Company Name", "companyName")) || "",
+        isDuplicate: clean(firstValue(row, "IsDuplicate", "Is Duplicate", "isDuplicate")) || "",
+        salesAgent: clean(firstValue(row, "Sales Agent", "salesAgent")) || "",
+        salesManager: clean(firstValue(row, "Sales Manager", "salesManager")) || "",
+        type: clean(firstValue(row, "Type", "type")) || "",
+        timeOut: clean(firstValue(row, "Time out", "Time Out", "timeOut")) || "",
+        locationOut: clean(firstValue(row, "Location out", "Location Out", "locationOut")) || ""
+    };
+}
+
+async function fetchOrientationRecords(userEmail, userFullName) {
+    try {
+        const url = new URL(ORIENTATIONS_API_URL);
+        url.searchParams.set("email", userEmail);
+
+        const response = await fetch(url, {
+            headers: { Accept: "application/json" },
+            signal: AbortSignal.timeout(15000)
+        });
+
+        if (!response.ok) {
+            throw new Error("Google Sheets Orientations API returned HTTP " + response.status);
+        }
+
+        const payload = await response.json();
+        const rows = Array.isArray(payload)
+            ? payload
+            : (Array.isArray(payload?.orientations)
+                ? payload.orientations
+                : (Array.isArray(payload?.records)
+                    ? payload.records
+                    : (Array.isArray(payload?.data) ? payload.data : null)));
+
+        if (!rows) {
+            throw new Error("Unexpected response format from Google Sheets Orientations API");
+        }
+
+        const normalized = rows
+            .filter(row => row && typeof row === "object" && !Array.isArray(row))
+            .map(normalizeOrientationRow);
+
+        const emailKey = key(userEmail);
+        const nameKey = key(userFullName);
+        const records = normalized.filter(row =>
+            (row.email && key(row.email) === emailKey) ||
+            (row.salesAgent && key(row.salesAgent) === nameKey)
+        );
+
+        return { records, error: null, fetchedAt: new Date().toISOString() };
+    } catch (error) {
+        console.error("Google Sheets Orientations fetch failed:", error.message || error);
+        return {
+            records: [],
+            error: error.name === "TimeoutError"
+                ? "Google Sheets Orientations request timed out"
+                : (error.message || "Unable to load Orientation records"),
+            fetchedAt: new Date().toISOString()
+        };
+    }
+}
+
 // GET /api/dashboard/overview. Application records are company-scoped;
 // Google Sheets rows are scoped to the authenticated user's email or agent name.
 router.get("/overview", async (req, res, next) => {
@@ -74,7 +178,7 @@ router.get("/overview", async (req, res, next) => {
             return res.status(401).json({ message: "User not found or inactive" });
         }
 
-        const requestedPeriod = String(req.query.period || "30d");
+        const requestedPeriod = String(req.query.period || "all");
         const period = PERIODS.has(requestedPeriod) ? requestedPeriod : "30d";
         const startDate = getPeriodStart(period);
         const requestedCompanyId = clean(req.query.companyId);
@@ -138,7 +242,7 @@ router.get("/overview", async (req, res, next) => {
             ]
         };
 
-        const [visits, visitsTotal, sourceRecords, dropdownRecords, syncedAt] = await Promise.all([
+        const [visits, visitsTotal, sourceRecords, dropdownRecords, syncedAt, orientationResult] = await Promise.all([
             companyIds.length
                 ? req.prisma.visit.findMany({
                     where: visitWhere,
@@ -179,8 +283,15 @@ router.get("/overview", async (req, res, next) => {
             req.prisma.googleSheetRecord.findFirst({
                 orderBy: { syncedAt: "desc" },
                 select: { syncedAt: true }
-            })
+            }),
+            fetchOrientationRecords(user.email, user.fullName)
         ]);
+
+        const allOrientations = orientationResult.records;
+        const orientationRows = allOrientations
+            .filter(row => !startDate || (row.parsedDate && row.parsedDate >= startDate))
+            .sort((a, b) => (b.parsedDate?.getTime() || 0) - (a.parsedDate?.getTime() || 0));
+
 
         const companies = memberships.map(membership => ({
             id: membership.company.id,
@@ -236,15 +347,29 @@ router.get("/overview", async (req, res, next) => {
             groupName: row.groupName
         })));
 
-        const visitsByMonth = countBy(visits, visit => monthKey(visit.scheduledAt))
+        const visitsByMonth = countBy([
+            ...visits.map(visit => ({ date: visit.scheduledAt })),
+            ...orientationRows.filter(row => row.parsedDate).map(row => ({ date: row.parsedDate }))
+        ], row => row.date ? monthKey(row.date) : null)
             .sort((a, b) => a.label.localeCompare(b.label));
         const visitsByStatus = countBy(visits, visit => visit.status);
-        const visitsByCompany = countBy(visits, visit => visit.company.name);
+        const visitsByCompany = countBy(orientationRows, row => row.companyName || row.newCompanyName);
         const visitsByTeam = countBy(visits, visit => visit.team?.name || "Unassigned team");
         const visitsByCreator = countBy(visits, visit => visit.createdBy.fullName);
         const visitsByAssignee = countBy(
             visits.flatMap(visit => visit.assignments.map(item => item.user.fullName))
         );
+        const orientationByType = countBy(orientationRows, row => row.type);
+        const orientationByBrokerType = countBy(orientationRows, row => row.brokerType);
+        const orientationByCompany = countBy(orientationRows, row => row.companyName || row.newCompanyName);
+        const orientationByAgent = countBy(orientationRows, row => row.salesAgent);
+        const orientationByManager = countBy(orientationRows, row => row.salesManager);
+        const orientationByLocationIn = countBy(orientationRows, row => row.locationIn);
+        const orientationByLocationOut = countBy(orientationRows, row => row.locationOut);
+        const orientationByMonth = countBy(
+            orientationRows.filter(row => row.parsedDate),
+            row => monthKey(row.parsedDate)
+        ).sort((a, b) => a.label.localeCompare(b.label));
 
         const relationships = {
             managerToAgents: pairBy(sourceRecords, row => row.managers, row => row.salesAgent),
@@ -270,7 +395,15 @@ router.get("/overview", async (req, res, next) => {
             visitToAssignees: pairBy(visits.flatMap(visit => visit.assignments.map(item => ({
                 companyName: visit.company.name,
                 assignee: item.user.fullName
-            }))), row => row.companyName, row => row.assignee)
+            }))), row => row.companyName, row => row.assignee),
+            orientationCompanyToAgents: pairBy(orientationRows, row => row.companyName || row.newCompanyName, row => row.salesAgent),
+            orientationAgentToManagers: pairBy(orientationRows, row => row.salesAgent, row => row.salesManager),
+            orientationCompanyToBrokerAdmins: pairBy(orientationRows, row => row.companyName || row.newCompanyName, row => row.brokerAdmin),
+            orientationTypeToBrokerType: pairBy(orientationRows, row => row.type, row => row.brokerType),
+            orientationLocationInToOut: pairBy(orientationRows, row => row.locationIn, row => row.locationOut),
+            orientationEmailToAgents: pairBy(orientationRows, row => row.email, row => row.salesAgent),
+            orientationProjectToCompany: pairBy(orientationRows, row => row.projectId, row => row.companyName || row.newCompanyName),
+            orientationRequestToCompany: pairBy(orientationRows, row => row.requestNumber, row => row.companyName || row.newCompanyName)
         };
 
         const missingEmailRecords = sourceRecords.filter(row => !clean(row.email)).length;
@@ -282,6 +415,41 @@ router.get("/overview", async (req, res, next) => {
         const dropdownAgentMatched = dropdownRecords.length - dropdownDirect;
         const completedVisits = visits.filter(visit => visit.status === "COMPLETED").length;
         const cancelledVisits = visits.filter(visit => visit.status === "CANCELLED").length;
+        const recentOrientationVisits = orientationRows.slice(0, 10).map((row, index) => ({
+            id: row.serial || "orientation-" + index,
+            recordType: "ORIENTATION",
+            companyName: row.companyName || row.newCompanyName || "—",
+            teamName: row.salesAgent || null,
+            scheduledAt: row.parsedDate ? row.parsedDate.toISOString() : null,
+            date: row.date,
+            timeIn: row.timeIn,
+            timeOut: row.timeOut,
+            locationIn: row.locationIn,
+            locationOut: row.locationOut,
+            brokerType: row.brokerType,
+            newCompanyName: row.newCompanyName,
+            brokerAdmin: row.brokerAdmin,
+            requestNumber: row.requestNumber,
+            projectId: row.projectId,
+            isDuplicate: row.isDuplicate,
+            salesAgent: row.salesAgent,
+            salesManager: row.salesManager,
+            type: row.type,
+            email: row.email,
+            createdBy: row.salesAgent || "—",
+            status: row.type || "ORIENTATION"
+        }));
+
+        const recentDatabaseVisits = visits.slice(0, 10).map(visit => ({
+            id: visit.id,
+            recordType: "APP_VISIT",
+            companyName: visit.company.name,
+            teamName: visit.team?.name || null,
+            scheduledAt: visit.scheduledAt,
+            status: visit.status,
+            createdBy: visit.createdBy.fullName,
+            assignees: visit.assignments.map(item => item.user.fullName)
+        }));
 
         return res.json({
             success: true,
@@ -290,8 +458,12 @@ router.get("/overview", async (req, res, next) => {
             user: { id: user.id, fullName: user.fullName, email: user.email },
             scope: {
                 companyIds,
-                visitsTotal,
-                visitsReturned: visits.length,
+                visitsTotal: visitsTotal + allOrientations.length,
+                appVisitsTotal: visitsTotal,
+                orientationVisitsTotal: allOrientations.length,
+                visitsReturned: visits.length + orientationRows.length,
+                appVisitsReturned: visits.length,
+                orientationVisitsReturned: orientationRows.length,
                 sourceRecordsScope: "Authenticated user's email or Sales Agent name",
                 sourceRecordsCount: sourceRecords.length
             },
@@ -299,8 +471,10 @@ router.get("/overview", async (req, res, next) => {
                 companies: activeMemberships.length,
                 members: companyMembers.length,
                 teams: teams.length,
-                visits: visitsTotal,
-                visitsInPeriod: visits.length,
+                visits: visitsTotal + allOrientations.length,
+                visitsInPeriod: visits.length + orientationRows.length,
+                orientationVisits: allOrientations.length,
+                orientationVisitsInPeriod: orientationRows.length,
                 completedVisits,
                 cancelledVisits,
                 sourceRecords: sourceRecords.length,
@@ -323,6 +497,14 @@ router.get("/overview", async (req, res, next) => {
                 visitsByTeam,
                 visitsByCreator,
                 visitsByAssignee,
+                orientationByMonth,
+                orientationByType,
+                orientationByBrokerType,
+                orientationByCompany,
+                orientationByAgent,
+                orientationByManager,
+                orientationByLocationIn,
+                orientationByLocationOut,
                 sourceByTeam: countBy(sourceTeamRows, row => row.teamName),
                 sourceByGroup: countBy(sourceRecords, row => row.groupName),
                 sourceByAgent: countBy(sourceRecords, row => row.salesAgent),
@@ -336,20 +518,22 @@ router.get("/overview", async (req, res, next) => {
             companies,
             teams,
             companyMembers,
-            recentVisits: visits.slice(0, 10).map(visit => ({
-                id: visit.id,
-                companyName: visit.company.name,
-                teamName: visit.team?.name || null,
-                scheduledAt: visit.scheduledAt,
-                status: visit.status,
-                createdBy: visit.createdBy.fullName,
-                assignees: visit.assignments.map(item => item.user.fullName)
-            })),
+            recentVisits: recentOrientationVisits.length ? recentOrientationVisits : recentDatabaseVisits,
+            orientationSource: {
+                status: orientationResult.error ? "error" : "connected",
+                recordsReturned: allOrientations.length,
+                recordsInPeriod: orientationRows.length,
+                fetchedAt: orientationResult.fetchedAt,
+                error: orientationResult.error
+            },
             dataQuality: {
                 sourceRecordsMissingEmail: missingEmailRecords,
                 sourceRecordsMissingAgent: missingAgentRecords,
                 sourceRecordsMissingCompany: missingCompanyRecords,
-                companyDropdownMissingEmail: dropdownRecords.filter(row => !clean(row.email)).length
+                companyDropdownMissingEmail: dropdownRecords.filter(row => !clean(row.email)).length,
+                orientationMissingCompany: allOrientations.filter(row => !row.companyName && !row.newCompanyName).length,
+                orientationMissingAgent: allOrientations.filter(row => !row.salesAgent).length,
+                orientationMissingEmail: allOrientations.filter(row => !row.email).length
             },
             lastGoogleSheetSyncAt: syncedAt?.syncedAt ?? null
         });
