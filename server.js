@@ -33,23 +33,23 @@ const ca = process.env.DB_CA?.replace(/\\n/g, "\n");
 if (!ca || !ca.includes("-----BEGIN CERTIFICATE-----") || !ca.includes("-----END CERTIFICATE-----")) {
     throw new Error("DB_CA is missing or invalid");
 }
-    const adapter = new PrismaMariaDb({
+   
+
+const adapter = new PrismaMariaDb({
     host: dbUrl.hostname,
     port: Number(dbUrl.port || 3306),
     user: decodeURIComponent(dbUrl.username),
     password: decodeURIComponent(dbUrl.password),
     database: decodeURIComponent(dbUrl.pathname.slice(1)),
     ssl: {
-   ssl: {
-    ca,
-    rejectUnauthorized: true
-},
-    rejectUnauthorized: true
+        ca,
+        rejectUnauthorized: true
     },
-    connectionLimit: 3,
+    connectionLimit: 5,
     acquireTimeout: 30000,
     connectTimeout: 30000
-    });
+});
+
     const prisma = new PrismaClient({ adapter });
     await prisma.$connect();
 
