@@ -124,6 +124,7 @@ router.get("/", async (req, res, next) => {
 
 
 
+
 router.get("/dropdown", async (req, res, next) => {
     try {
         const user = await req.prisma.user.findUnique({
@@ -248,6 +249,7 @@ router.get("/dropdown", async (req, res, next) => {
         next(error);
     }
 });
+
 
 // GET /api/companies/:companyId
 // Get company details.
