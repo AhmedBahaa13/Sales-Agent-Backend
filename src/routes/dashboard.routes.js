@@ -82,8 +82,7 @@ router.get("/overview", async (req, res, next) => {
         const memberships = await req.prisma.companyMember.findMany({
             where: {
                 userId: user.id,
-                company: { isActive: true },
-                ...(requestedCompanyId ? { companyId: requestedCompanyId } : {})
+                company: { isActive: true }
             },
             orderBy: { createdAt: "asc" },
             include: {
@@ -113,12 +112,16 @@ router.get("/overview", async (req, res, next) => {
         });
 
         const companyIds = memberships.map(item => item.companyId);
-        if (requestedCompanyId && companyIds.length === 0) {
+        if (requestedCompanyId && !companyIds.includes(requestedCompanyId)) {
             return res.status(403).json({ message: "You are not a member of this company" });
         }
+        const selectedCompanyIds = requestedCompanyId ? [requestedCompanyId] : companyIds;
+        const activeMemberships = requestedCompanyId
+            ? memberships.filter(item => item.companyId === requestedCompanyId)
+            : memberships;
 
         const visitWhere = {
-            companyId: { in: companyIds },
+            companyId: { in: selectedCompanyIds },
             ...(startDate ? { scheduledAt: { gte: startDate } } : {})
         };
         const userEmail = user.email.trim().toLowerCase();
@@ -158,7 +161,7 @@ router.get("/overview", async (req, res, next) => {
                     orderBy: { scheduledAt: "desc" }
                 })
                 : Promise.resolve([]),
-            companyIds.length ? req.prisma.visit.count({ where: visitWhere }) : Promise.resolve(0),
+            selectedCompanyIds.length ? req.prisma.visit.count({ where: visitWhere }) : Promise.resolve(0),
             req.prisma.googleSheetRecord.findMany({
                 where: sheetWhere,
                 select: {
@@ -189,7 +192,7 @@ router.get("/overview", async (req, res, next) => {
             createdAt: membership.company.createdAt
         }));
 
-        const teams = memberships.flatMap(membership =>
+        const teams = activeMemberships.flatMap(membership =>
             membership.company.teams.map(team => ({
                 id: team.id,
                 name: team.name,
@@ -207,7 +210,7 @@ router.get("/overview", async (req, res, next) => {
             }))
         );
 
-        const companyMembers = memberships.flatMap(membership =>
+        const companyMembers = activeMemberships.flatMap(membership =>
             membership.company.members.map(member => ({
                 companyId: membership.company.id,
                 companyName: membership.company.name,
@@ -293,7 +296,7 @@ router.get("/overview", async (req, res, next) => {
                 sourceRecordsCount: sourceRecords.length
             },
             summary: {
-                companies: companies.length,
+                companies: activeMemberships.length,
                 members: companyMembers.length,
                 teams: teams.length,
                 visits: visitsTotal,
