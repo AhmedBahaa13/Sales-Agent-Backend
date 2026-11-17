@@ -7,6 +7,7 @@ const myDataRoutes = require("./src/routes/my-data.routes");
 const authRoutes = require("./src/routes/auth.routes");
 const companyRoutes = require("./src/routes/company.routes");
 const sheetsSyncRoutes = require("./src/routes/sheets-sync.routes");
+const dashboardRoutes = require("./src/routes/dashboard.routes");
 async function startServer() {
     if (!process.env.DB_CA) {
     throw new Error("DB_CA is missing");
@@ -75,6 +76,7 @@ app.use(express.json({ limit: "10mb" }));
     app.use("/api/my-data", myDataRoutes);
     app.use("/api/companies", companyRoutes);
     app.use("/api/sync", sheetsSyncRoutes);
+    app.use("/api/dashboard", dashboardRoutes);
 
     app.get("/api/sync/google-sheet/status", async (req, res, next) => {
     try {
