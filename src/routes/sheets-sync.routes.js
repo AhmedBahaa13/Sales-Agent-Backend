@@ -187,7 +187,7 @@ router.post("/google-sheet", async (req, res, next) => {
         }
 
         // Both tables are updated atomically in the new format.
-        await req.prisma.$transaction(async (tx) => {
+       const result =  await req.prisma.$transaction(async (tx) => {
                 await tx.googleSheetRecord.deleteMany();
 
                 const sourceInserted = await tx.googleSheetRecord.createMany({
