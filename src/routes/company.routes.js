@@ -123,148 +123,122 @@ router.get("/", async (req, res, next) => {
 });
 
 
+
 router.get("/dropdown", async (req, res, next) => {
     try {
-        // 1. Get authenticated user's email from database
         const user = await req.prisma.user.findUnique({
             where: {
                 id: req.userId
             },
             select: {
-                email: true
+                email: true,
+                fullName: true
             }
         });
 
-        if (!user || !user.email) {
+        if (!user) {
             return res.status(404).json({
-                message: "User email not found"
+                message: "User not found"
             });
         }
 
-        const userEmail = user.email.trim().toLowerCase();
+        const userEmail = user.email?.trim().toLowerCase() || "";
+        const userName = user.fullName?.trim() || "";
 
-        // 2. Find companies directly assigned to this email
-        const directRecords = await req.prisma.companyDropdown.findMany({
-            where: {
-                email: userEmail
-            },
-            orderBy: {
-                companyName: "asc"
-            }
-        });
-
-        // 3. Extract the Sales Agents assigned to this email
-        const normalizeAgent = value =>
+        const normalize = value =>
             String(value || "").trim().toLowerCase();
 
-        const agents = [
-            ...new Set(
-                directRecords
-                    .map(record => normalizeAgent(record.salesAgent))
-                    .filter(Boolean)
-            )
-        ];
-
-        // 4. Find records without email belonging to these agents
-        const agentRecords = agents.length
+        // 1. Direct email matching
+        const directRecords = userEmail
             ? await req.prisma.companyDropdown.findMany({
                 where: {
-                    salesAgent: {
-                        in: [
-                            ...new Set(
-                                directRecords
-                                    .map(record => record.salesAgent)
-                                    .filter(Boolean)
-                            )
-                        ]
-                    }
+                    email: userEmail
+                },
+                orderBy: {
+                    companyName: "asc"
                 }
             })
             : [];
 
-        // 5. Determine which agents are uniquely linked to this email
-        const agentEmails = new Map();
-
-        for (const record of agentRecords) {
-            const agent = normalizeAgent(record.salesAgent);
-            const email = record.email?.trim().toLowerCase();
-
-            if (!agent || !email) continue;
-
-            if (!agentEmails.has(agent)) {
-                agentEmails.set(agent, new Set());
-            }
-
-            agentEmails.get(agent).add(email);
-        }
+        // 2. Match by Sales Agent name
+        const agentRecords = userName
+            ? await req.prisma.companyDropdown.findMany({
+                where: {
+                    salesAgent: {
+                        equals: userName
+                    }
+                },
+                orderBy: {
+                    companyName: "asc"
+                }
+            })
+            : [];
 
         const warnings = [];
         const companiesMap = new Map();
 
-        // 6. Add direct email matches
+        // 3. Add direct email matches
         for (const record of directRecords) {
-            const key = record.companyName.trim().toLowerCase();
-
-            if (!companiesMap.has(key)) {
-                companiesMap.set(key, {
-                    id: record.id,
-                    dropdownId: record.dropdownId,
-                    companyName: record.companyName,
-                    salesAgent: record.salesAgent,
-                    email: record.email,
-                    accessType: "DIRECT",
-                    warnings: []
-                });
-            }
-        }
-
-        // 7. Add companies with missing email only when agent is unambiguous
-        for (const record of agentRecords) {
-            if (record.email) continue;
-
-            const agent = normalizeAgent(record.salesAgent);
-            const emails = agentEmails.get(agent);
-
-            if (!emails || !emails.has(userEmail)) continue;
-
-            if (emails.size > 1) {
-                continue;
-            }
-
-            const key = record.companyName.trim().toLowerCase();
-
-            if (companiesMap.has(key)) continue;
+            const key = normalize(record.companyName);
 
             companiesMap.set(key, {
                 id: record.id,
                 dropdownId: record.dropdownId,
                 companyName: record.companyName,
                 salesAgent: record.salesAgent,
-                email: null,
-                accessType: "AGENT_MATCH",
-                warnings: [
-                    "This company has no email assigned. Access was matched through Sales Agent."
-                ]
+                email: record.email,
+                accessType: "DIRECT",
+                warnings: []
             });
         }
 
-        // 8. Report ambiguous agents
-        for (const agent of agents) {
-            const emails = agentEmails.get(agent);
+        // 4. Add Sales Agent matches
+        for (const record of agentRecords) {
+            const key = normalize(record.companyName);
 
-            if (emails && emails.size > 1) {
-                warnings.push({
-                    type: "AMBIGUOUS_AGENT",
-                    salesAgent: agent,
-                    message: "This Sales Agent is linked to multiple emails. Companies without an email require manual review."
-                });
-            }
+            if (companiesMap.has(key)) continue;
+
+            const missingEmail = !record.email;
+
+            companiesMap.set(key, {
+                id: record.id,
+                dropdownId: record.dropdownId,
+                companyName: record.companyName,
+                salesAgent: record.salesAgent,
+                email: record.email,
+                accessType: "AGENT_MATCH",
+                warnings: missingEmail
+                    ? [
+                        "This company has no email assigned. Access was matched through Sales Agent name."
+                    ]
+                    : [
+                        "Access was matched through Sales Agent name. User email differs from the assigned email."
+                    ]
+            });
+        }
+
+        // 5. Warn if agent is linked to multiple emails
+        const agentEmails = [
+            ...new Set(
+                agentRecords
+                    .map(record => normalize(record.email))
+                    .filter(Boolean)
+            )
+        ];
+
+        if (agentEmails.length > 1) {
+            warnings.push({
+                type: "MULTIPLE_AGENT_EMAILS",
+                salesAgent: userName,
+                message: "This Sales Agent is linked to multiple emails in the Dropdown sheet."
+            });
         }
 
         const companies = [...companiesMap.values()];
 
         return res.json({
             userEmail,
+            userName,
             count: companies.length,
             companies,
             warnings
@@ -274,6 +248,7 @@ router.get("/dropdown", async (req, res, next) => {
         next(error);
     }
 });
+
 // GET /api/companies/:companyId
 // Get company details.
 router.get("/:companyId", async (req, res, next) => {
