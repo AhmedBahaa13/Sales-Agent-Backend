@@ -51,7 +51,12 @@
       const params=new URLSearchParams({period:$("periodFilter").value||"30d"});if($("companyFilter").value)params.set("companyId",$("companyFilter").value);
       const data=await api("/api/dashboard/overview?"+params.toString());state.data=data;state.user=data.user||state.user;showApp(state.user);
       populateCompanies(data.companies||[]);renderDashboard(data);populateRelations(data.relationships||{});renderRelations(data.relationships||{});
-      $("syncText").textContent=data.lastGoogleSheetSyncAt?t("lastSync")+" "+date(data.lastGoogleSheetSyncAt):t("notSynced");
+      const orientationInfo=data.orientationSource||{};
+      const sheetSync=data.lastGoogleSheetSyncAt?t("lastSync")+" "+date(data.lastGoogleSheetSyncAt):t("notSynced");
+      const orientationStatus=orientationInfo.status==="connected"
+        ? (state.language==="ar"?"الـ Orientations: متصل · "+num(orientationInfo.recordsReturned)+" سجل":"Orientations: connected · "+num(orientationInfo.recordsReturned)+" records")
+        : (state.language==="ar"?"تعذر تحميل الـ Orientations: "+(orientationInfo.error||"خطأ غير معروف"):"Orientations unavailable: "+(orientationInfo.error||"Unknown error"));
+      $("syncText").textContent=sheetSync+" · "+orientationStatus;
       $("periodLabel").textContent=({"7d":t("last7"),"30d":t("last30"),"90d":t("last90"),"365d":t("last365"),"all":t("allTime")})[$("periodFilter").value]||t("last30");
       if(showMessage)toast(t("refresh"));
     }catch(err){if(err.message!==t("sessionExpired"))toast(err.message||t("networkError"));}
