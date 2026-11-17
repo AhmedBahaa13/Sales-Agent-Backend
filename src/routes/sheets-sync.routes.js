@@ -114,24 +114,27 @@ function mapSourceRow(row) {
     };
 }
 
+
 function mapDropdownRow(row, index) {
     const companyName = normalizeValue(row["Company Name"]);
+    const salesAgent = normalizeValue(row["Sales Agent"]);
     const email = normalizeValue(row["Email"])?.toLowerCase() ?? null;
 
-    if (!companyName || !email) {
+    if (!companyName || !salesAgent) {
         throw {
             status: 400,
-            message: `Dropdown: row ${index + 1} must contain Company Name and Email`
+            message: `Dropdown: row ${index + 1} must contain Company Name and Sales Agent`
         };
     }
 
     return {
         dropdownId: normalizeValue(row["ID Dropdown"]),
         companyName,
-        salesAgent: normalizeValue(row["Sales Agent"]),
+        salesAgent,
         email
     };
 }
+
 
 // POST /api/sync/google-sheet
 router.post("/google-sheet", async (req, res, next) => {

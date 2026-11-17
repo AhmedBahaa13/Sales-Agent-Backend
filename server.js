@@ -1,6 +1,7 @@
 
 require("dotenv").config();
-
+const fs = require("fs");
+const path = require("path");
 const express = require("express");
 const myDataRoutes = require("./src/routes/my-data.routes");
 const authRoutes = require("./src/routes/auth.routes");
@@ -26,17 +27,25 @@ async function startServer() {
         import("./dist/generated/prisma/client.js")
     ]);
 
- const dbUrl = new URL(process.env.DATABASE_URL);
+    const dbUrl = new URL(process.env.DATABASE_URL);
 
- const adapter = new PrismaMariaDb({
+    const adapter = new PrismaMariaDb({
     host: dbUrl.hostname,
     port: Number(dbUrl.port || 3306),
     user: decodeURIComponent(dbUrl.username),
     password: decodeURIComponent(dbUrl.password),
-    database: dbUrl.pathname.slice(1),
-    ssl: { ca: process.env.DB_CA },
-    connectionLimit: 5
-    }); 
+    database: decodeURIComponent(dbUrl.pathname.slice(1)),
+    ssl: {
+    ca: fs.readFileSync(
+        path.join(__dirname, "aiven-ca.pem"),
+        "utf8"
+    ),
+    rejectUnauthorized: true
+    },
+    connectionLimit: 3,
+    acquireTimeout: 30000,
+    connectTimeout: 30000
+    });
     const prisma = new PrismaClient({ adapter });
     await prisma.$connect();
 

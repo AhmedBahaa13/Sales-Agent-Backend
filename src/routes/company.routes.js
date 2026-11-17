@@ -122,6 +122,158 @@ router.get("/", async (req, res, next) => {
     }
 });
 
+
+router.get("/dropdown", async (req, res, next) => {
+    try {
+        // 1. Get authenticated user's email from database
+        const user = await req.prisma.user.findUnique({
+            where: {
+                id: req.userId
+            },
+            select: {
+                email: true
+            }
+        });
+
+        if (!user || !user.email) {
+            return res.status(404).json({
+                message: "User email not found"
+            });
+        }
+
+        const userEmail = user.email.trim().toLowerCase();
+
+        // 2. Find companies directly assigned to this email
+        const directRecords = await req.prisma.companyDropdown.findMany({
+            where: {
+                email: userEmail
+            },
+            orderBy: {
+                companyName: "asc"
+            }
+        });
+
+        // 3. Extract the Sales Agents assigned to this email
+        const normalizeAgent = value =>
+            String(value || "").trim().toLowerCase();
+
+        const agents = [
+            ...new Set(
+                directRecords
+                    .map(record => normalizeAgent(record.salesAgent))
+                    .filter(Boolean)
+            )
+        ];
+
+        // 4. Find records without email belonging to these agents
+        const agentRecords = agents.length
+            ? await req.prisma.companyDropdown.findMany({
+                where: {
+                    salesAgent: {
+                        in: [
+                            ...new Set(
+                                directRecords
+                                    .map(record => record.salesAgent)
+                                    .filter(Boolean)
+                            )
+                        ]
+                    }
+                }
+            })
+            : [];
+
+        // 5. Determine which agents are uniquely linked to this email
+        const agentEmails = new Map();
+
+        for (const record of agentRecords) {
+            const agent = normalizeAgent(record.salesAgent);
+            const email = record.email?.trim().toLowerCase();
+
+            if (!agent || !email) continue;
+
+            if (!agentEmails.has(agent)) {
+                agentEmails.set(agent, new Set());
+            }
+
+            agentEmails.get(agent).add(email);
+        }
+
+        const warnings = [];
+        const companiesMap = new Map();
+
+        // 6. Add direct email matches
+        for (const record of directRecords) {
+            const key = record.companyName.trim().toLowerCase();
+
+            if (!companiesMap.has(key)) {
+                companiesMap.set(key, {
+                    id: record.id,
+                    dropdownId: record.dropdownId,
+                    companyName: record.companyName,
+                    salesAgent: record.salesAgent,
+                    email: record.email,
+                    accessType: "DIRECT",
+                    warnings: []
+                });
+            }
+        }
+
+        // 7. Add companies with missing email only when agent is unambiguous
+        for (const record of agentRecords) {
+            if (record.email) continue;
+
+            const agent = normalizeAgent(record.salesAgent);
+            const emails = agentEmails.get(agent);
+
+            if (!emails || !emails.has(userEmail)) continue;
+
+            if (emails.size > 1) {
+                continue;
+            }
+
+            const key = record.companyName.trim().toLowerCase();
+
+            if (companiesMap.has(key)) continue;
+
+            companiesMap.set(key, {
+                id: record.id,
+                dropdownId: record.dropdownId,
+                companyName: record.companyName,
+                salesAgent: record.salesAgent,
+                email: null,
+                accessType: "AGENT_MATCH",
+                warnings: [
+                    "This company has no email assigned. Access was matched through Sales Agent."
+                ]
+            });
+        }
+
+        // 8. Report ambiguous agents
+        for (const agent of agents) {
+            const emails = agentEmails.get(agent);
+
+            if (emails && emails.size > 1) {
+                warnings.push({
+                    type: "AMBIGUOUS_AGENT",
+                    salesAgent: agent,
+                    message: "This Sales Agent is linked to multiple emails. Companies without an email require manual review."
+                });
+            }
+        }
+
+        const companies = [...companiesMap.values()];
+
+        return res.json({
+            userEmail,
+            count: companies.length,
+            companies,
+            warnings
+        });
+
+    } catch (error) {
+        next(error);
+    }
+});
 // GET /api/companies/:companyId
 // Get company details.
 router.get("/:companyId", async (req, res, next) => {
@@ -314,5 +466,10 @@ router.get("/:companyId/members", async (req, res, next) => {
         next(error);
     }
 });
+
+
+// GET /api/companies/dropdown
+// Get Google Sheets companies assigned to the authenticated user.
+
 
 module.exports = router;
