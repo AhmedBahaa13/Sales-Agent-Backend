@@ -28,7 +28,11 @@ async function startServer() {
     ]);
 
     const dbUrl = new URL(process.env.DATABASE_URL);
+const ca = process.env.DB_CA?.replace(/\\n/g, "\n");
 
+if (!ca || !ca.includes("-----BEGIN CERTIFICATE-----") || !ca.includes("-----END CERTIFICATE-----")) {
+    throw new Error("DB_CA is missing or invalid");
+}
     const adapter = new PrismaMariaDb({
     host: dbUrl.hostname,
     port: Number(dbUrl.port || 3306),
@@ -36,10 +40,10 @@ async function startServer() {
     password: decodeURIComponent(dbUrl.password),
     database: decodeURIComponent(dbUrl.pathname.slice(1)),
     ssl: {
-    ca: fs.readFileSync(
-        path.join(__dirname, "aiven-ca.pem"),
-        "utf8"
-    ),
+   ssl: {
+    ca,
+    rejectUnauthorized: true
+},
     rejectUnauthorized: true
     },
     connectionLimit: 3,
