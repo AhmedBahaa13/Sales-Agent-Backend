@@ -1,5 +1,6 @@
 const express = require("express");
 const { authenticateToken } = require("../middleware/auth.middleware");
+const { isAdminEmail } = require("../utils/admin-access");
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -64,6 +65,7 @@ function monthKey(date) {
 
 const ORIENTATIONS_API_URL = process.env.ORIENTATIONS_API_URL ||
     "https://script.google.com/macros/s/AKfycbwJwiTyjuXOPh_mMPpl5NbKdTgI0ZQwVAgk7l4tT-nPkqdiU0-WOOtQDOXeOMsGywxP/exec";
+const ORIENTATIONS_ADMIN_API_URL = process.env.ORIENTATIONS_ADMIN_API_URL || ORIENTATIONS_API_URL;
 
 function firstValue(row, ...names) {
     for (const name of names) {
@@ -76,7 +78,7 @@ function parseOrientationDate(value) {
     const raw = clean(value);
     if (!raw) return null;
 
-    const dmy = raw.match(/^(\\d{1,2})[\\/. -](\\d{1,2})[\\/. -](\\d{4})(?:\\s+(.*))?$/);
+    const dmy = raw.match(/^(\d{1,2})[\/. -](\d{1,2})[\/. -](\d{4})(?:\s+(.*))?$/);
     if (dmy) {
         const parsed = new Date(
             Number(dmy[3]),
@@ -115,10 +117,10 @@ function normalizeOrientationRow(row) {
     };
 }
 
-async function fetchOrientationRecords(userEmail, userFullName) {
+async function fetchOrientationRecords(userEmail, userFullName, isAdmin = false) {
     try {
-        const url = new URL(ORIENTATIONS_API_URL);
-        url.searchParams.set("email", userEmail);
+        const url = new URL(isAdmin ? ORIENTATIONS_ADMIN_API_URL : ORIENTATIONS_API_URL);
+        if (!isAdmin) url.searchParams.set("email", userEmail);
 
         const response = await fetch(url, {
             headers: { Accept: "application/json" },
@@ -148,7 +150,7 @@ async function fetchOrientationRecords(userEmail, userFullName) {
 
         const emailKey = key(userEmail);
         const nameKey = key(userFullName);
-        const records = normalized.filter(row =>
+        const records = isAdmin ? normalized : normalized.filter(row =>
             (row.email && key(row.email) === emailKey) ||
             (row.salesAgent && key(row.salesAgent) === nameKey)
         );
