@@ -168,6 +168,193 @@ async function fetchOrientationRecords(userEmail, userFullName, isAdmin = false)
     }
 }
 
+
+function getSourceTeams(row) {
+    return uniqueByName(TEAM_FIELDS.map(field => row?.[field]));
+}
+
+function buildManagerVisitHierarchy(orientationRows, sourceRecords) {
+    const managers = new Map();
+    const orphanAgents = new Map();
+    const unassignedVisits = [];
+    const sourceById = new Map();
+    const sourceByAgent = new Map();
+
+    const makeAgent = name => ({ name, visitCount: 0, visits: [] });
+    const makeTeam = name => ({ name, visitCount: 0, agents: new Map() });
+    const makeManager = name => ({
+        name, visitCount: 0, teams: new Map(), unassignedVisits: []
+    });
+
+    const ensureManager = name => {
+        const id = key(name);
+        if (!managers.has(id)) managers.set(id, makeManager(name));
+        return managers.get(id);
+    };
+    const ensureOrphanAgent = name => {
+        const id = key(name);
+        if (!orphanAgents.has(id)) {
+            orphanAgents.set(id, { name, visitCount: 0, teams: new Map(), visits: [] });
+        }
+        return orphanAgents.get(id);
+    };
+    const ensureTeam = (container, teamName) => {
+        const name = clean(teamName) || "Unassigned team";
+        const id = key(name);
+        if (!container.teams.has(id)) container.teams.set(id, makeTeam(name));
+        return container.teams.get(id);
+    };
+    const ensureAgentInTeam = (team, agentName) => {
+        const name = clean(agentName) || "Unassigned Sales Agent";
+        const id = key(name);
+        if (!team.agents.has(id)) team.agents.set(id, makeAgent(name));
+        return team.agents.get(id);
+    };
+
+    for (const source of sourceRecords) {
+        const sourceId = key(source.sourceId);
+        if (sourceId) {
+            if (!sourceById.has(sourceId)) sourceById.set(sourceId, []);
+            sourceById.get(sourceId).push(source);
+        }
+
+        const agentId = key(source.salesAgent);
+        if (agentId) {
+            if (!sourceByAgent.has(agentId)) sourceByAgent.set(agentId, []);
+            sourceByAgent.get(agentId).push(source);
+        }
+
+        const agentName = clean(source.salesAgent);
+        if (!agentName) continue;
+
+        const managerName = clean(source.managers);
+        const teamNames = getSourceTeams(source);
+        const teams = teamNames.length ? teamNames : ["Unassigned team"];
+
+        if (managerName) {
+            const manager = ensureManager(managerName);
+            for (const teamName of teams) {
+                ensureAgentInTeam(ensureTeam(manager, teamName), agentName);
+            }
+        } else {
+            const agent = ensureOrphanAgent(agentName);
+            for (const teamName of teams) ensureTeam(agent, teamName);
+        }
+    }
+
+    function findSourceMatch(visit) {
+        const byId = key(visit.projectId)
+            ? (sourceById.get(key(visit.projectId)) || [])
+            : [];
+        const sameIdAgentCompany = byId.find(source =>
+            (!visit.salesAgent || key(source.salesAgent) === key(visit.salesAgent)) &&
+            (!visit.companyName || key(source.companyName) === key(visit.companyName))
+        );
+        if (sameIdAgentCompany) return sameIdAgentCompany;
+
+        const byAgent = key(visit.salesAgent)
+            ? (sourceByAgent.get(key(visit.salesAgent)) || [])
+            : [];
+        const sameAgentCompany = byAgent.find(source =>
+            !visit.companyName || key(source.companyName) === key(visit.companyName)
+        );
+        return byId[0] || sameAgentCompany || byAgent[0] || null;
+    }
+
+    for (let index = 0; index < orientationRows.length; index += 1) {
+        const row = orientationRows[index];
+        const source = findSourceMatch(row);
+        const agentName = clean(row.salesAgent) || clean(source?.salesAgent);
+        const managerName = clean(row.salesManager) || clean(source?.managers);
+        const teamName = getSourceTeams(source || {})[0] || "Unassigned team";
+        const visit = {
+            id: row.serial || "orientation-" + index,
+            serial: row.serial,
+            projectId: row.projectId,
+            date: row.date,
+            scheduledAt: row.parsedDate ? row.parsedDate.toISOString() : null,
+            timeIn: row.timeIn,
+            timeOut: row.timeOut,
+            locationIn: row.locationIn,
+            locationOut: row.locationOut,
+            companyName: row.companyName || row.newCompanyName || "—",
+            brokerType: row.brokerType,
+            newCompanyName: row.newCompanyName,
+            brokerAdmin: row.brokerAdmin,
+            requestNumber: row.requestNumber,
+            isDuplicate: row.isDuplicate,
+            salesAgent: agentName || "",
+            salesManager: managerName || "",
+            type: row.type,
+            email: row.email
+        };
+
+        if (managerName) {
+            const manager = ensureManager(managerName);
+            manager.visitCount += 1;
+            if (!agentName) {
+                manager.unassignedVisits.push(visit);
+                continue;
+            }
+            const team = ensureTeam(manager, teamName);
+            team.visitCount += 1;
+            const agent = ensureAgentInTeam(team, agentName);
+            agent.visitCount += 1;
+            agent.visits.push(visit);
+        } else if (agentName) {
+            const orphan = ensureOrphanAgent(agentName);
+            orphan.visitCount += 1;
+            orphan.visits.push(visit);
+            const team = ensureTeam(orphan, teamName);
+            team.visitCount += 1;
+            const teamAgent = ensureAgentInTeam(team, agentName);
+            teamAgent.visitCount += 1;
+            teamAgent.visits.push(visit);
+        } else {
+            unassignedVisits.push(visit);
+        }
+    }
+
+    const serializeAgents = agents => [...agents.values()]
+        .map(agent => ({ ...agent }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+    const serializedManagers = [...managers.values()].map(manager => ({
+        name: manager.name,
+        visitCount: manager.visitCount,
+        unassignedVisits: manager.unassignedVisits,
+        teams: [...manager.teams.values()].map(team => ({
+            name: team.name,
+            visitCount: team.visitCount,
+            agents: serializeAgents(team.agents)
+        })).sort((a, b) => a.name.localeCompare(b.name))
+    })).sort((a, b) => a.name.localeCompare(b.name));
+
+    const serializedOrphans = [...orphanAgents.values()].map(agent => ({
+        name: agent.name,
+        visitCount: agent.visitCount,
+        visits: agent.visits,
+        teams: [...agent.teams.values()].map(team => ({
+            name: team.name,
+            visitCount: team.visitCount,
+            agents: serializeAgents(team.agents)
+        })).sort((a, b) => a.name.localeCompare(b.name))
+    })).sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+        managers: serializedManagers,
+        unassignedAgents: serializedOrphans,
+        unassignedVisits,
+        summary: {
+            managers: serializedManagers.length,
+            teams: serializedManagers.reduce((total, manager) => total + manager.teams.length, 0),
+            unassignedAgents: serializedOrphans.length,
+            visits: orientationRows.length,
+            unassignedVisits: unassignedVisits.length
+        }
+    };
+}
+
 // GET /api/dashboard/overview. Application records are company-scoped;
 // Google Sheets rows are scoped to the authenticated user's email or agent name.
 router.get("/overview", async (req, res, next) => {
