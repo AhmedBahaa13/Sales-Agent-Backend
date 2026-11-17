@@ -66,7 +66,14 @@
     const s=data.summary||{};
     const cards=[["totalCompanies",s.companies,"▦",t("members")+": "+num(s.members)],["teams",s.teams,"⌘",t("sourceTeamsKpi")+": "+num(s.sourceTeams)],["totalVisits",s.visitsInPeriod,"◷",t("completed")+": "+num(s.completedVisits)],["sourceRecords",s.sourceRecords,"≋",t("sourceCompanies")+": "+num(s.sourceCompanies)]];
     $("kpiGrid").innerHTML=cards.map(c=>'<article class="kpi-card"><div class="kpi-top"><span>'+esc(t(c[0]))+'</span><span class="kpi-icon">'+c[2]+'</span></div><div class="kpi-value">'+num(c[1])+'</div><div class="kpi-note">'+esc(c[3])+'</div></article>').join("");
-    const charts=data.charts||{};renderLine("visitTrend",charts.visitsByMonth||[]);renderDonut("statusChart",charts.visitsByStatus||[]);renderBars("teamChart",charts.visitsByTeam||[]);renderBars("companyChart",charts.visitsByCompany||[]);renderBars("sourceTeamChart",charts.sourceByTeam||[]);renderBars("agentChart",charts.sourceByAgent||[]);renderHealth(data);renderVisits(data.recentVisits||[]);
+    const charts=data.charts||{};
+    renderLine("visitTrend",charts.orientationByMonth?.length?charts.orientationByMonth:(charts.visitsByMonth||[]));
+    renderDonut("statusChart",charts.orientationByType?.length?charts.orientationByType:(charts.visitsByStatus||[]));
+    renderBars("teamChart",charts.orientationByManager?.length?charts.orientationByManager:(charts.visitsByTeam||[]));
+    renderBars("companyChart",charts.orientationByCompany?.length?charts.orientationByCompany:(charts.visitsByCompany||[]));
+    renderBars("sourceTeamChart",charts.orientationByAgent?.length?charts.orientationByAgent:(charts.sourceByTeam||[]));
+    renderBars("agentChart",charts.orientationByBrokerType?.length?charts.orientationByBrokerType:(charts.sourceByAgent||[]));
+    renderHealth(data);renderVisits(data.orientationVisits||data.recentVisits||[]);
   }
   function renderBars(id,items){
     const root=$(id);if(!items.length){root.innerHTML='<div class="empty-chart">'+esc(t("noData"))+'</div>';return;}
@@ -96,7 +103,27 @@
   }
   function renderVisits(visits){
     if(!visits.length){$("recentVisits").innerHTML='<div class="empty-chart">'+esc(t("noRecentVisits"))+'</div>';return;}
-    $("recentVisits").innerHTML=visits.slice(0,7).map(v=>'<div class="recent-item"><div><strong>'+esc(v.companyName||t("unknown"))+'</strong><small>'+esc(date(v.scheduledAt))+' · '+esc(v.teamName||t("unassigned"))+'</small><small>'+esc(t("createdBy"))+': '+esc(v.createdBy||"—")+'</small></div><span class="status-pill '+esc(String(v.status||"").toLowerCase())+'">'+esc(statusLabel(v.status))+'</span></div>').join("");
+    const ar=state.language==="ar";
+    const label=(en,arabic)=>ar?arabic:en;
+    $("recentVisits").innerHTML=visits.map(v=>{
+      const rows=[
+        [label("Date","التاريخ"),v.date||date(v.scheduledAt)],
+        [label("Time in","وقت الدخول"),v.timeIn],
+        [label("Time out","وقت الخروج"),v.timeOut],
+        [label("Sales agent","مندوب المبيعات"),v.salesAgent||v.createdBy],
+        [label("Sales manager","مدير المبيعات"),v.salesManager],
+        [label("Broker admin","مسؤول الشركة"),v.brokerAdmin],
+        [label("Broker type","نوع الوسيط"),v.brokerType],
+        [label("Activity","نوع النشاط"),v.type],
+        [label("Request number","رقم الطلب"),v.requestNumber],
+        [label("Project ID","كود المشروع"),v.projectId],
+        [label("Check-in location","موقع الدخول"),v.locationIn],
+        [label("Check-out location","موقع الخروج"),v.locationOut],
+        [label("Email","البريد الإلكتروني"),v.email],
+        [label("Duplicate","مكرر؟"),v.isDuplicate]
+      ].filter(x=>x[1]!==null&&x[1]!==undefined&&String(x[1]).trim()!=="");
+      return '<div class="recent-item orientation-record"><div><strong>'+esc(v.companyName||v.newCompanyName||t("unknown"))+'</strong><small>'+esc(v.date||date(v.scheduledAt))+' · '+esc(v.timeIn||"—")+'</small><div class="orientation-details">'+rows.map(x=>'<span><b>'+esc(x[0])+':</b> '+esc(x[1])+'</span>').join("")+'</div></div><span class="status-pill">'+esc(v.type||"Orientation")+'</span></div>';
+    }).join("");
   }
   function populateRelations(relations){
     const select=$("relationshipFilter"),current=select.value;
