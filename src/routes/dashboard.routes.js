@@ -173,7 +173,7 @@ function getSourceTeams(row) {
     return uniqueByName(TEAM_FIELDS.map(field => row?.[field]));
 }
 
-function buildManagerVisitHierarchy(orientationRows, sourceRecords) {
+function buildManagerVisitHierarchy(orientationRows, sourceRecords, databaseVisits = []) {
     const managers = new Map();
     const orphanAgents = new Map();
     const unassignedVisits = [];
@@ -340,6 +340,54 @@ function buildManagerVisitHierarchy(orientationRows, sourceRecords) {
         .map(agent => ({ ...agent }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
+    for (const databaseVisit of databaseVisits) {
+        const agentName = clean(databaseVisit.createdBy?.fullName) || "";
+        const source = findSourceMatch({
+            salesAgent: agentName,
+            companyName: databaseVisit.company?.name || ""
+        });
+        const managerName = clean(source?.managers);
+        const teamName = clean(databaseVisit.team?.name) ||
+            getSourceTeams(source || {})[0] || "Unassigned team";
+        const visit = {
+            id: databaseVisit.id,
+            recordType: "APP_VISIT",
+            companyName: databaseVisit.company?.name || "—",
+            teamName: databaseVisit.team?.name || teamName,
+            clientName: databaseVisit.clientName,
+            clientPhone: databaseVisit.clientPhone,
+            propertyName: databaseVisit.propertyName,
+            propertyAddress: databaseVisit.propertyAddress,
+            scheduledAt: databaseVisit.scheduledAt,
+            status: databaseVisit.status,
+            notes: databaseVisit.notes,
+            salesAgent: agentName,
+            salesManager: managerName || "",
+            type: "PROPERTY_VISIT",
+            createdBy: agentName
+        };
+        if (managerName) {
+            const manager = ensureManager(managerName);
+            manager.visitCount += 1;
+            const team = ensureTeam(manager, teamName);
+            team.visitCount += 1;
+            const agent = ensureAgentInTeam(team, agentName);
+            agent.visitCount += 1;
+            agent.visits.push(visit);
+        } else if (agentName) {
+            const orphan = ensureOrphanAgent(agentName);
+            orphan.visitCount += 1;
+            orphan.visits.push(visit);
+            const team = ensureTeam(orphan, teamName);
+            team.visitCount += 1;
+            const teamAgent = ensureAgentInTeam(team, agentName);
+            teamAgent.visitCount += 1;
+            teamAgent.visits.push(visit);
+        } else {
+            unassignedVisits.push(visit);
+        }
+    }
+
     const serializedManagers = [...managers.values()].map(manager => ({
         name: manager.name,
         visitCount: manager.visitCount,
@@ -371,7 +419,7 @@ function buildManagerVisitHierarchy(orientationRows, sourceRecords) {
             teams: serializedManagers.reduce((total, manager) => total + manager.teams.length, 0) +
                 serializedOrphans.reduce((total, agent) => total + agent.teams.length, 0),
             unassignedAgents: serializedOrphans.length,
-            visits: orientationRows.length,
+            visits: orientationRows.length + databaseVisits.length,
             unassignedVisits: unassignedVisits.length +
                 serializedManagers.reduce((total, manager) => total + manager.unassignedVisits.length, 0)
         }
@@ -491,6 +539,11 @@ router.get("/overview", async (req, res, next) => {
                         scheduledAt: true,
                         status: true,
                         createdAt: true,
+                        clientName: true,
+                        clientPhone: true,
+                        propertyName: true,
+                        propertyAddress: true,
+                        notes: true,
                         company: { select: { id: true, name: true } },
                         team: { select: { id: true, name: true } },
                         createdBy: { select: { id: true, fullName: true, email: true } },
@@ -530,7 +583,7 @@ router.get("/overview", async (req, res, next) => {
             .filter(row => !startDate || (row.parsedDate && row.parsedDate >= startDate))
             .sort((a, b) => (b.parsedDate?.getTime() || 0) - (a.parsedDate?.getTime() || 0));
         const managerHierarchy = isAdmin
-            ? buildManagerVisitHierarchy(orientationRows, sourceRecords)
+            ? buildManagerVisitHierarchy(orientationRows, sourceRecords, visits)
             : null;
 
 
@@ -688,7 +741,13 @@ router.get("/overview", async (req, res, next) => {
             teamName: visit.team?.name || null,
             scheduledAt: visit.scheduledAt,
             status: visit.status,
+            clientName: visit.clientName,
+            clientPhone: visit.clientPhone,
+            propertyName: visit.propertyName,
+            propertyAddress: visit.propertyAddress,
+            notes: visit.notes,
             createdBy: visit.createdBy.fullName,
+            salesAgent: visit.createdBy.fullName,
             assignees: visit.assignments.map(item => item.user.fullName)
         }));
 
@@ -782,7 +841,10 @@ router.get("/overview", async (req, res, next) => {
                 salesManager: row.salesManager,
                 type: row.type
             })),
-            recentVisits: recentOrientationVisits.length ? recentOrientationVisits : recentDatabaseVisits,
+            databaseVisits: recentDatabaseVisits,
+            recentVisits: [...recentOrientationVisits, ...recentDatabaseVisits]
+                .sort((a, b) => new Date(b.scheduledAt || 0).getTime() - new Date(a.scheduledAt || 0).getTime())
+                .slice(0, 10),
             orientationSource: {
                 status: orientationResult.error ? "error" : "connected",
                 scope: isAdmin ? "ALL" : "USER",
