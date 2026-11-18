@@ -372,7 +372,8 @@ function buildManagerVisitHierarchy(orientationRows, sourceRecords) {
                 serializedOrphans.reduce((total, agent) => total + agent.teams.length, 0),
             unassignedAgents: serializedOrphans.length,
             visits: orientationRows.length,
-            unassignedVisits: unassignedVisits.length
+            unassignedVisits: unassignedVisits.length +
+                serializedManagers.reduce((total, manager) => total + manager.unassignedVisits.length, 0)
         }
     };
 }
