@@ -106,6 +106,9 @@ router.post("/", async (req, res, next) => {
             assignments: visit.assignments.map(item => ({ userId: item.user.id, fullName: item.user.fullName })),
             createdAt: visit.createdAt
         } });
-    } catch (error) { next(error); }
+    } catch (error) {
+        if (error.status) return res.status(error.status).json({ message: error.message });
+        next(error);
+    }
 });
 module.exports = router;
