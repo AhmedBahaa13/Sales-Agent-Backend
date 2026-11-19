@@ -71,6 +71,18 @@
     const s=data.summary||{};
     const isAdmin=data.user?.role==="ADMIN";
     const personal=data.personalSummary||{};
+    const setPanelCopy=(id,title,subtitle)=>{const panel=$(id).closest(".panel");const heading=panel?.querySelector("h2");const description=panel?.querySelector("p");if(heading)heading.textContent=title;if(description)description.textContent=subtitle;};
+    if(isAdmin){
+      setPanelCopy("visitTrend",state.language==="ar"?"نشاط الزيارات":"Visit activity",state.language==="ar"?"حجم الزيارات شهريًا خلال الفترة المحددة":"Monthly visit volume in the selected period");
+      setPanelCopy("statusChart",state.language==="ar"?"حالة الزيارات":"Visit status",state.language==="ar"?"توزيع الحالات خلال الفترة":"Current period breakdown");
+      setPanelCopy("teamChart",state.language==="ar"?"أداء الفرق":"Team performance",state.language==="ar"?"الزيارات حسب الفريق":"Visits by team");
+      setPanelCopy("companyChart",state.language==="ar"?"أكثر الشركات نشاطًا":"Top companies",state.language==="ar"?"الزيارات حسب الشركة":"Visits by company");
+    }else{
+      setPanelCopy("visitTrend",t("visitTrend"),t("visitTrendSub"));
+      setPanelCopy("statusChart",t("visitStatus"),t("visitStatusSub"));
+      setPanelCopy("teamChart",t("visitDuration"),t("visitDurationSub"));
+      setPanelCopy("companyChart",t("topCompanies"),t("topCompaniesSub"));
+    }
     const cards=isAdmin
       ? [["totalCompanies",s.companies,"▦",t("members")+": "+num(s.members)],["teams",s.teams,"⌘",t("sourceTeamsKpi")+": "+num(s.sourceTeams)],["totalVisits",s.visitsInPeriod,"◷",t("completed")+": "+num(s.completedVisits)],["sourceRecords",s.sourceRecords,"≋",t("sourceCompanies")+": "+num(s.sourceCompanies)]]
       : [["myVisits",personal.total,"◷",t("topCompaniesSub")],["myCompleted",personal.completed,"✓",t("completed")+": "+num(personal.completionRate||0)+"%"],["myPending",personal.pending,"◌",t("inProgress")],["averageDuration",personal.averageDurationMinutes==null?"—":num(personal.averageDurationMinutes)+" "+(state.language==="ar"?"دقيقة":"min"),"◴",t("completed")+": "+num(personal.completed)]];
@@ -90,13 +102,13 @@
       renderBars("companyChart",charts.personalVisitsByCompany||[]);
       $("sourceTeamChart").closest("article").classList.add("hidden");
       $("agentChart").closest("article").classList.add("hidden");
-      $("relationshipSection").classList.add("hidden");
+      $("relationships").classList.add("hidden");
       $("dataHealthPanel").classList.add("hidden");
     }
     if(isAdmin){
       $("sourceTeamChart").closest("article").classList.remove("hidden");
       $("agentChart").closest("article").classList.remove("hidden");
-      $("relationshipSection").classList.remove("hidden");
+      $("relationships").classList.remove("hidden");
       $("dataHealthPanel").classList.remove("hidden");
     }
     renderHealth(data);
@@ -176,7 +188,7 @@
     const dots=pts.map(p=>'<circle class="chart-dot" cx="'+p.x+'" cy="'+p.y+'" r="4.5"><title>'+esc(p.item.label)+": "+num(p.item.value)+'</title></circle>').join("");
     const interval=Math.max(1,Math.ceil(items.length/6));
     const labels=pts.map((p,i)=>{if(i%interval!==0&&i!==items.length-1)return "";return '<text class="chart-label" x="'+p.x+'" y="'+(h-10)+'" text-anchor="middle">'+esc(p.item.label)+'</text>';}).join("");
-    root.innerHTML='<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="'+esc(t("visitTrend"))+'" preserveAspectRatio="xMidYMid meet"><defs><linearGradient id="'+esc(id)+'Fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#4169e1" stop-opacity=".22"/><stop offset="100%" stop-color="#4169e1" stop-opacity="0"/></linearGradient></defs>'+grid+'<path class="area" fill="url(#'+esc(id)+'Fill)" d="'+area+'"/><path class="chart-line" d="'+path+'"/>'+dots+labels+'</svg>';
+    root.innerHTML='<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="'+esc(t("visitTrend"))+'" preserveAspectRatio="xMidYMid meet"><defs><linearGradient id="'+esc(id)+'Fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#4169e1" stop-opacity=".22"/><stop offset="100%" stop-color="#4169e1" stop-opacity="0"/></linearGradient></defs>'+grid+'<path class="trend-area" fill="url(#'+esc(id)+'Fill)" d="'+area+'"/><path class="chart-line" d="'+path+'"/>'+dots+labels+'</svg>';
   }
   function renderHealth(data){
     const q=data.dataQuality||{},total=Math.max(1,Number(data.summary?.sourceRecords||0));
@@ -197,6 +209,10 @@
           [label("Address","العنوان"),v.propertyAddress],
           [label("Team","الفريق"),v.teamName],
           [label("Status","الحالة"),statusLabel(v.status)],
+          [label("Started at","وقت البداية"),v.startedAt?date(v.startedAt):""],
+          [label("Ended at","وقت النهاية"),v.endedAt?date(v.endedAt):""],
+          [label("Start GPS","موقع البداية"),v.startLatitude!=null&&v.startLongitude!=null?(v.startLatitude+", "+v.startLongitude):""],
+          [label("End GPS","موقع النهاية"),v.endLatitude!=null&&v.endLongitude!=null?(v.endLatitude+", "+v.endLongitude):""],
           [label("Notes","ملاحظات"),v.notes],
           [label("Created by","أنشأها"),v.createdBy]
         ] : []),
