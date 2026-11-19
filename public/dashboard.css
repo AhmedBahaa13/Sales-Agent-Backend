@@ -42,3 +42,5 @@
 .orphan-manager{border-color:var(--blue)}
 @media(max-width:900px){.admin-hierarchy-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-agent-visits{grid-template-columns:1fr}}
 @media(max-width:600px){.admin-manager>summary{align-items:flex-start;flex-wrap:wrap}.admin-manager>summary em{margin-inline-start:0}.admin-visit-fields{grid-template-columns:1fr}}
+
+.chart-axis-label{fill:#8791a4;font-size:10px;font-variant-numeric:tabular-nums}.chart-area svg{display:block;overflow:visible}.chart-area{padding:0 2px 2px}

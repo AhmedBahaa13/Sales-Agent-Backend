@@ -62,6 +62,44 @@ function monthKey(date) {
     const d = new Date(date);
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
 }
+function buildVisitTrend(visits, period) {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const buckets = [];
+    const dayCount = period === "7d" ? 7 : period === "30d" ? 30 : 0;
+    if (dayCount) {
+        for (let i = dayCount - 1; i >= 0; i -= 1) {
+            const start = new Date(today); start.setDate(start.getDate() - i);
+            const end = new Date(start); end.setDate(end.getDate() + 1);
+            buckets.push({ start, end, label: new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(start) });
+        }
+    } else if (period === "90d") {
+        for (let i = 12; i >= 0; i -= 1) {
+            const end = new Date(today); end.setDate(end.getDate() - i * 7 + 1);
+            const start = new Date(end); start.setDate(start.getDate() - 7);
+            buckets.push({ start, end, label: new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(start) });
+        }
+    } else {
+        for (let i = 11; i >= 0; i -= 1) {
+            const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+            buckets.push({ start, end, label: new Intl.DateTimeFormat("en", { month: "short" }).format(start) });
+        }
+    }
+    return buckets.map(bucket => ({
+        label: bucket.label,
+        value: visits.filter(visit => {
+            const raw = visit.startedAt || visit.scheduledAt;
+            const date = raw ? new Date(raw) : null;
+            return date && !Number.isNaN(date.getTime()) && date >= bucket.start && date < bucket.end;
+        }).length
+    }));
+}
+function getDurationMinutes(visit) {
+    if (!visit.startedAt || !visit.endedAt) return null;
+    const value = (new Date(visit.endedAt).getTime() - new Date(visit.startedAt).getTime()) / 60000;
+    return Number.isFinite(value) && value >= 0 ? value : null;
+}
 
 const ORIENTATIONS_API_URL = process.env.ORIENTATIONS_API_URL ||
     "https://script.google.com/macros/s/AKfycbwJwiTyjuXOPh_mMPpl5NbKdTgI0ZQwVAgk7l4tT-nPkqdiU0-WOOtQDOXeOMsGywxP/exec";
@@ -359,6 +397,12 @@ function buildManagerVisitHierarchy(orientationRows, sourceRecords, databaseVisi
             propertyName: databaseVisit.propertyName,
             propertyAddress: databaseVisit.propertyAddress,
             scheduledAt: databaseVisit.scheduledAt,
+            startedAt: databaseVisit.startedAt,
+            endedAt: databaseVisit.endedAt,
+            startLatitude: databaseVisit.startLatitude,
+            startLongitude: databaseVisit.startLongitude,
+            endLatitude: databaseVisit.endLatitude,
+            endLongitude: databaseVisit.endLongitude,
             status: databaseVisit.status,
             notes: databaseVisit.notes,
             salesAgent: agentName,
@@ -536,6 +580,7 @@ router.get("/overview", async (req, res, next) => {
                         id: true,
                         companyId: true,
                         teamId: true,
+                        createdById: true,
                         scheduledAt: true,
                         status: true,
                         createdAt: true,
@@ -577,6 +622,43 @@ router.get("/overview", async (req, res, next) => {
             }),
             fetchOrientationRecords(user.email, user.fullName, isAdmin)
         ]);
+
+        const lifecycleRows = visits.length
+            ? await req.prisma.$queryRawUnsafe(
+                "SELECT `id`, `startedAt`, `endedAt`, `startLatitude`, `startLongitude`, `endLatitude`, `endLongitude` FROM `Visit` WHERE `id` IN (" + visits.map(() => "?").join(",") + ")",
+                ...visits.map(visit => visit.id)
+            )
+            : [];
+        const lifecycleById = new Map(lifecycleRows.map(row => [row.id, row]));
+        for (const visit of visits) {
+            const lifecycle = lifecycleById.get(visit.id) || {};
+            visit.startedAt = lifecycle.startedAt || null;
+            visit.endedAt = lifecycle.endedAt || null;
+            visit.startLatitude = lifecycle.startLatitude == null ? null : Number(lifecycle.startLatitude);
+            visit.startLongitude = lifecycle.startLongitude == null ? null : Number(lifecycle.startLongitude);
+            visit.endLatitude = lifecycle.endLatitude == null ? null : Number(lifecycle.endLatitude);
+            visit.endLongitude = lifecycle.endLongitude == null ? null : Number(lifecycle.endLongitude);
+        }
+        const personalVisits = visits.filter(visit =>
+            visit.createdById === user.id || visit.assignments.some(item => item.user.id === user.id)
+        );
+        const personalDurations = personalVisits.map(getDurationMinutes).filter(value => value !== null);
+        const averageDurationMinutes = personalDurations.length
+            ? Math.round(personalDurations.reduce((sum, value) => sum + value, 0) / personalDurations.length)
+            : null;
+        const pendingPersonalVisits = personalVisits.filter(visit => visit.status === "IN_PROGRESS").length;
+        const completedPersonalVisits = personalVisits.filter(visit => visit.status === "COMPLETED").length;
+        const personalDurationBuckets = [
+            { label: "Under 30 min", min: 0, max: 30 },
+            { label: "30–60 min", min: 30, max: 60 },
+            { label: "1–2 hr", min: 60, max: 120 },
+            { label: "2–4 hr", min: 120, max: 240 },
+            { label: "4+ hr", min: 240, max: Infinity }
+        ].map(bucket => ({ label: bucket.label, value: personalDurations.filter(value => value >= bucket.min && value < bucket.max).length }))
+          .filter(bucket => bucket.value > 0);
+        const personalVisitsByCompany = countBy(personalVisits, visit => visit.company.name).slice(0, 8);
+        const personalVisitsByStatus = countBy(personalVisits, visit => visit.status);
+        const personalTrend = buildVisitTrend(personalVisits, period);
 
         const allOrientations = orientationResult.records;
         const orientationRows = allOrientations
@@ -740,6 +822,12 @@ router.get("/overview", async (req, res, next) => {
             companyName: visit.company.name,
             teamName: visit.team?.name || null,
             scheduledAt: visit.scheduledAt,
+            startedAt: visit.startedAt,
+            endedAt: visit.endedAt,
+            startLatitude: visit.startLatitude,
+            startLongitude: visit.startLongitude,
+            endLatitude: visit.endLatitude,
+            endLongitude: visit.endLongitude,
             status: visit.status,
             clientName: visit.clientName,
             clientPhone: visit.clientPhone,
@@ -768,6 +856,13 @@ router.get("/overview", async (req, res, next) => {
                 dataScope: isAdmin ? "ALL" : "USER",
                 sourceRecordsScope: isAdmin ? "All Google Sheets records (Global Admin)" : "Authenticated user's email or Sales Agent name",
                 sourceRecordsCount: sourceRecords.length
+            },
+            personalSummary: {
+                total: personalVisits.length,
+                completed: completedPersonalVisits,
+                pending: pendingPersonalVisits,
+                averageDurationMinutes,
+                completionRate: personalVisits.length ? Math.round(completedPersonalVisits / personalVisits.length * 100) : 0
             },
             summary: {
                 companies: activeMemberships.length,
@@ -814,7 +909,11 @@ router.get("/overview", async (req, res, next) => {
                 dropdownByAccessType: [
                     { label: "Direct email", value: dropdownDirect },
                     { label: "Sales Agent match", value: dropdownAgentMatched }
-                ].filter(item => item.value > 0)
+                ].filter(item => item.value > 0),
+                personalVisitsTrend: personalTrend,
+                personalVisitsByStatus,
+                personalVisitsByCompany,
+                personalDurationBuckets
             },
             relationships,
             companies,
@@ -841,7 +940,26 @@ router.get("/overview", async (req, res, next) => {
                 salesManager: row.salesManager,
                 type: row.type
             })),
-            databaseVisits: recentDatabaseVisits,
+            databaseVisits: (isAdmin ? visits : personalVisits).map(visit => ({
+                id: visit.id, recordType: "APP_VISIT", companyName: visit.company.name,
+                teamName: visit.team?.name || null, scheduledAt: visit.scheduledAt,
+                startedAt: visit.startedAt, endedAt: visit.endedAt,
+                startLatitude: visit.startLatitude, startLongitude: visit.startLongitude,
+                endLatitude: visit.endLatitude, endLongitude: visit.endLongitude,
+                status: visit.status, clientName: visit.clientName, clientPhone: visit.clientPhone,
+                propertyName: visit.propertyName, propertyAddress: visit.propertyAddress,
+                notes: visit.notes, createdBy: visit.createdBy.fullName, salesAgent: visit.createdBy.fullName
+            })),
+            personalRecentVisits: personalVisits.slice(0, 10).map(visit => ({
+                id: visit.id, recordType: "APP_VISIT", companyName: visit.company.name,
+                teamName: visit.team?.name || null, scheduledAt: visit.scheduledAt,
+                startedAt: visit.startedAt, endedAt: visit.endedAt,
+                startLatitude: visit.startLatitude, startLongitude: visit.startLongitude,
+                endLatitude: visit.endLatitude, endLongitude: visit.endLongitude,
+                status: visit.status, clientName: visit.clientName, clientPhone: visit.clientPhone,
+                propertyName: visit.propertyName, propertyAddress: visit.propertyAddress,
+                notes: visit.notes, createdBy: visit.createdBy.fullName, salesAgent: visit.createdBy.fullName
+            })),
             recentVisits: [...recentOrientationVisits, ...recentDatabaseVisits]
                 .sort((a, b) => new Date(b.scheduledAt || 0).getTime() - new Date(a.scheduledAt || 0).getTime())
                 .slice(0, 10),

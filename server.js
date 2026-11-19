@@ -9,6 +9,22 @@ const companyRoutes = require("./src/routes/company.routes");
 const sheetsSyncRoutes = require("./src/routes/sheets-sync.routes");
 const dashboardRoutes = require("./src/routes/dashboard.routes");
 const visitRoutes = require("./src/routes/visits.routes");
+async function ensureVisitLifecycleColumns(prisma) {
+    const columns = await prisma.$queryRawUnsafe("SHOW COLUMNS FROM `Visit`");
+    const existing = new Set(columns.map(column => column.Field));
+    const definitions = {
+        startedAt: "DATETIME(3) NULL", endedAt: "DATETIME(3) NULL",
+        startLatitude: "DECIMAL(10,7) NULL", startLongitude: "DECIMAL(10,7) NULL",
+        endLatitude: "DECIMAL(10,7) NULL", endLongitude: "DECIMAL(10,7) NULL"
+    };
+    for (const [name, definition] of Object.entries(definitions)) {
+        if (!existing.has(name)) {
+            await prisma.$executeRawUnsafe("ALTER TABLE `Visit` ADD COLUMN `" + name + "` " + definition);
+            console.log("Added Visit." + name + " lifecycle column");
+        }
+    }
+}
+
 async function startServer() {
     if (!process.env.DB_CA) {
     throw new Error("DB_CA is missing");
@@ -54,6 +70,7 @@ const adapter = new PrismaMariaDb({
 
     const prisma = new PrismaClient({ adapter });
     await prisma.$connect();
+    await ensureVisitLifecycleColumns(prisma);
 
     console.log("Database connected successfully");
 

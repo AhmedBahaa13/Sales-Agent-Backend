@@ -34,7 +34,7 @@
       <a class="brand" href="#"><span class="brand-mark small">B</span><span>BrokerFlow</span></a>
       <div class="side-label" data-i18n="workspace">WORKSPACE</div>
       <a class="nav-link active" href="#overview"><span>▦</span><span data-i18n="overview">Overview</span></a>
-      <a class="nav-link" href="#relationships"><span>⌘</span><span data-i18n="relationships">Relationships</span></a>
+      <a class="nav-link" id="relationshipsNav" href="#relationships"><span>⌘</span><span data-i18n="relationships">Relationships</span></a>
       <a class="nav-link" href="#visits"><span>◷</span><span data-i18n="visits">Visits</span></a>
       <div class="sidebar-bottom">
         <div class="user-mini"><div class="avatar" id="userAvatar">U</div><div class="user-meta"><strong id="userName">User</strong><small id="userEmail">—</small></div></div>
@@ -92,8 +92,8 @@
           <div class="panel-head"><div><h2 data-i18n="visitStatus">Visit status</h2><p data-i18n="visitStatusSub">Current period breakdown</p></div></div>
           <div id="statusChart" class="donut-layout"></div>
         </article>
-        <article class="panel">
-          <div class="panel-head"><div><h2 data-i18n="teamPerformance">Team performance</h2><p data-i18n="teamPerformanceSub">Visits by team</p></div></div>
+        <article class="panel" id="durationPanel">
+          <div class="panel-head"><div><h2 data-i18n="visitDuration">Visit duration</h2><p data-i18n="visitDurationSub">Completed visits grouped by duration</p></div></div>
           <div id="teamChart" class="bar-list"></div>
         </article>
         <article class="panel">
@@ -120,7 +120,7 @@
       </section>
 
       <section class="bottom-grid">
-        <article class="panel">
+        <article class="panel" id="dataHealthPanel">
           <div class="panel-head"><div><h2 data-i18n="dataHealth">Data health</h2><p data-i18n="dataHealthSub">Missing fields in your source data</p></div></div>
           <div id="dataHealth" class="health-list"></div>
         </article>
