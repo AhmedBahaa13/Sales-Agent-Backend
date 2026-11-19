@@ -138,7 +138,11 @@
         [label("Property","العقار"),visit.propertyName],
         [label("Address","العنوان"),visit.propertyAddress],
         [label("Team","الفريق"),visit.teamName],
-        [label("Status","الحالة"),visit.status],
+        [label("Status","الحالة"),statusLabel(visit.status)],
+        [label("Started at","وقت البداية"),visit.startedAt?date(visit.startedAt):""],
+        [label("Ended at","وقت النهاية"),visit.endedAt?date(visit.endedAt):""],
+        [label("Start GPS","موقع البداية"),visit.startLatitude!=null&&visit.startLongitude!=null?(visit.startLatitude+", "+visit.startLongitude):""],
+        [label("End GPS","موقع النهاية"),visit.endLatitude!=null&&visit.endLongitude!=null?(visit.endLatitude+", "+visit.endLongitude):""],
         [label("Notes","ملاحظات"),visit.notes],
         [label("Created by","أنشأها"),visit.createdBy],
         [label("Time in","وقت الدخول"),visit.timeIn],
@@ -166,6 +170,8 @@
   }
   function renderBars(id,items){
     const root=$(id);if(!items.length){root.innerHTML='<div class="empty-chart">'+esc(t("noData"))+'</div>';return;}
+    const labelsAr={"Under 30 min":"أقل من 30 دقيقة","30–60 min":"30–60 دقيقة","1–2 hr":"1–2 ساعة","2–4 hr":"2–4 ساعات","4+ hr":"أكثر من 4 ساعات"};
+    if(id==="teamChart"&&state.language==="ar")items=items.map(item=>Object.assign({},item,{label:labelsAr[item.label]||item.label}));
     const list=items.slice(0,7),max=Math.max(1,...list.map(x=>Number(x.value)));
     root.innerHTML=list.map(x=>'<div class="bar-item"><span class="bar-name" title="'+esc(x.label)+'">'+esc(x.label)+'</span><div class="bar-track"><div class="bar-fill" style="width:'+Math.max(2,Number(x.value)/max*100)+'%"></div></div><span class="bar-value">'+num(x.value)+'</span></div>').join("");
   }
