@@ -6,6 +6,11 @@ const TEAM_FIELDS = ["team", "team1", "team2", "team3", "team4", "team5"];
 router.use(authenticateToken);
 const clean = value => value == null || !String(value).trim() ? null : String(value).trim();
 const normalize = value => String(value || "").trim().toLocaleLowerCase();
+function coordinate(value, min, max) {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= min && number <= max ? number : null;
+}
 function uniqueNames(values) {
     const map = new Map();
     values.forEach(value => { const name = clean(value); if (name && !map.has(normalize(name))) map.set(normalize(name), name); });
@@ -49,10 +54,17 @@ router.post("/", async (req, res, next) => {
         const companyName = clean(body.companyName), teamName = clean(body.teamName);
         const clientName = clean(body.clientName), clientPhone = clean(body.clientPhone);
         const propertyName = clean(body.propertyName), propertyAddress = clean(body.propertyAddress);
-        const notes = clean(body.notes), scheduledAt = new Date(body.scheduledAt);
-        if (!companyName || !clientName || !propertyAddress || !body.scheduledAt || Number.isNaN(scheduledAt.getTime())) {
-            return res.status(400).json({ message: "Company, client name, property address and a valid visit date/time are required" });
+        const notes = clean(body.notes);
+        const startLatitude = coordinate(body.startLatitude ?? body.latitude, -90, 90);
+        const startLongitude = coordinate(body.startLongitude ?? body.longitude, -180, 180);
+        if (!companyName || !clientName || !propertyAddress) {
+            return res.status(400).json({ message: "Company, client name and property address are required" });
         }
+        if (startLatitude === null || startLongitude === null) {
+            return res.status(400).json({ message: "Current visit start location is required" });
+        }
+        const startedAt = new Date();
+        const scheduledAt = startedAt;
         if (clientName.length > 150 || propertyAddress.length > 500 || (clientPhone && clientPhone.length > 40) || (propertyName && propertyName.length > 180)) {
             return res.status(400).json({ message: "One or more fields exceed the allowed length" });
         }
@@ -86,9 +98,9 @@ router.post("/", async (req, res, next) => {
                 data: {
                     companyId: company.id, teamId: team ? team.id : null, createdById: req.userId,
                     clientName, clientPhone, propertyName, propertyAddress,
-                    latitude: body.latitude !== undefined && body.latitude !== null && body.latitude !== "" && Number.isFinite(Number(body.latitude)) ? Number(body.latitude) : null,
-                    longitude: body.longitude !== undefined && body.longitude !== null && body.longitude !== "" && Number.isFinite(Number(body.longitude)) ? Number(body.longitude) : null,
-                    scheduledAt, notes, assignments: { create: { userId: req.userId } }
+                    latitude: startLatitude, longitude: startLongitude,
+                    scheduledAt, status: "IN_PROGRESS", notes,
+                    assignments: { create: { userId: req.userId } }
                 },
                 include: {
                     company: { select: { id: true, name: true } }, team: { select: { id: true, name: true } },
@@ -96,18 +108,59 @@ router.post("/", async (req, res, next) => {
                     assignments: { include: { user: { select: { id: true, fullName: true, email: true } } } }
                 }
             });
+            await tx.$executeRawUnsafe(
+                "UPDATE `Visit` SET `startedAt` = ?, `startLatitude` = ?, `startLongitude` = ? WHERE `id` = ?",
+                startedAt, startLatitude, startLongitude, visit.id
+            );
+            return visit;
         }, { maxWait: 10000, timeout: 20000 });
-        return res.status(201).json({ success: true, message: "Visit created successfully", visit: {
+        return res.status(201).json({ success: true, message: "Visit started successfully", visit: {
             id: visit.id, companyId: visit.companyId, companyName: visit.company.name,
             teamId: visit.teamId, teamName: visit.team ? visit.team.name : null,
             clientName: visit.clientName, clientPhone: visit.clientPhone, propertyName: visit.propertyName,
-            propertyAddress: visit.propertyAddress, scheduledAt: visit.scheduledAt, status: visit.status,
-            notes: visit.notes, createdBy: visit.createdBy.fullName, createdById: visit.createdBy.id,
+            propertyAddress: visit.propertyAddress, scheduledAt: visit.scheduledAt, startedAt,
+            startLatitude, startLongitude, endedAt: null, endLatitude: null, endLongitude: null,
+            status: visit.status, notes: visit.notes, createdBy: visit.createdBy.fullName, createdById: visit.createdBy.id,
             assignments: visit.assignments.map(item => ({ userId: item.user.id, fullName: item.user.fullName })),
             createdAt: visit.createdAt
         } });
     } catch (error) {
         if (error.status) return res.status(error.status).json({ message: error.message });
+        next(error);
+    }
+});
+
+router.patch("/:id/complete", async (req, res, next) => {
+    try {
+        const visitId = clean(req.params.id);
+        const endLatitude = coordinate(req.body?.endLatitude, -90, 90);
+        const endLongitude = coordinate(req.body?.endLongitude, -180, 180);
+        if (endLatitude === null || endLongitude === null) {
+            return res.status(400).json({ message: "Current visit end location is required" });
+        }
+        const visit = await req.prisma.visit.findUnique({
+            where: { id: visitId },
+            select: { id: true, status: true, createdById: true, scheduledAt: true, assignments: { select: { userId: true } } }
+        });
+        if (!visit) return res.status(404).json({ message: "Visit not found" });
+        const isAssigned = visit.assignments.some(item => item.userId === req.userId);
+        if (visit.createdById !== req.userId && !isAssigned) {
+            return res.status(403).json({ message: "You are not allowed to complete this visit" });
+        }
+        if (visit.status !== "IN_PROGRESS") {
+            return res.status(409).json({ message: "Only pending visits can be completed" });
+        }
+        const endedAt = new Date();
+        const changed = await req.prisma.$executeRawUnsafe(
+            "UPDATE `Visit` SET `startedAt` = COALESCE(`startedAt`, ?), `endedAt` = ?, `endLatitude` = ?, `endLongitude` = ?, `status` = 'COMPLETED', `updatedAt` = ? WHERE `id` = ? AND `status` = 'IN_PROGRESS'",
+            visit.scheduledAt, endedAt, endLatitude, endLongitude, endedAt, visitId
+        );
+        if (!changed) return res.status(409).json({ message: "This visit has already been completed" });
+        return res.json({ success: true, message: "Visit completed successfully", visit: {
+            id: visit.id, status: "COMPLETED", startedAt: visit.scheduledAt,
+            endedAt, endLatitude, endLongitude
+        } });
+    } catch (error) {
         next(error);
     }
 });
