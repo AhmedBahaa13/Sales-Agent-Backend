@@ -114,6 +114,13 @@ model Visit {
   latitude  Decimal? @db.Decimal(10, 7)
   longitude Decimal? @db.Decimal(10, 7)
 
+  startedAt      DateTime? @db.DateTime(3)
+  endedAt        DateTime? @db.DateTime(3)
+  startLatitude  Decimal?  @db.Decimal(10, 7)
+  startLongitude Decimal?  @db.Decimal(10, 7)
+  endLatitude    Decimal?  @db.Decimal(10, 7)
+  endLongitude   Decimal?  @db.Decimal(10, 7)
+
   scheduledAt DateTime
   status      VisitStatus @default(SCHEDULED)
   notes       String?     @db.Text
