@@ -94,7 +94,7 @@ router.post("/", async (req, res, next) => {
                     update: {}, create: { teamId: team.id, userId: req.userId, role: "MEMBER" }
                 });
             }
-            return tx.visit.create({
+            const visit = await tx.visit.create({
                 data: {
                     companyId: company.id, teamId: team ? team.id : null, createdById: req.userId,
                     clientName, clientPhone, propertyName, propertyAddress,
