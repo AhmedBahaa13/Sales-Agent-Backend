@@ -105,6 +105,8 @@
       $("relationships").classList.add("hidden");
       $("dataHealthPanel").classList.add("hidden");
     }
+    $("relationshipsNav").classList.toggle("hidden",!isAdmin);
+    $("syncText").closest(".sync-status").classList.toggle("hidden",!isAdmin);
     if(isAdmin){
       $("sourceTeamChart").closest("article").classList.remove("hidden");
       $("agentChart").closest("article").classList.remove("hidden");
