@@ -92,8 +92,8 @@
           <div class="panel-head"><div><h2 data-i18n="visitStatus">Visit status</h2><p data-i18n="visitStatusSub">Current period breakdown</p></div></div>
           <div id="statusChart" class="donut-layout"></div>
         </article>
-        <article class="panel">
-          <div class="panel-head"><div><h2 data-i18n="teamPerformance">Team performance</h2><p data-i18n="teamPerformanceSub">Visits by team</p></div></div>
+        <article class="panel" id="durationPanel">
+          <div class="panel-head"><div><h2 data-i18n="visitDuration">Visit duration</h2><p data-i18n="visitDurationSub">Completed visits grouped by duration</p></div></div>
           <div id="teamChart" class="bar-list"></div>
         </article>
         <article class="panel">
@@ -110,7 +110,7 @@
         </article>
       </section>
 
-      <section id="relationships" class="panel relationship-panel">
+      <section id="relationshipSection" class="panel relationship-panel">
         <div class="panel-head relationship-head">
           <div><p class="eyebrow" data-i18n="dataExplorer">DATA EXPLORER</p><h2 data-i18n="relationshipMap">Relationship explorer</h2><p data-i18n="relationshipSub">Explore how managers, agents, companies, teams and groups connect.</p></div>
           <select id="relationshipFilter" aria-label="Relationship type"></select>
@@ -120,7 +120,7 @@
       </section>
 
       <section class="bottom-grid">
-        <article class="panel">
+        <article class="panel" id="dataHealthPanel">
           <div class="panel-head"><div><h2 data-i18n="dataHealth">Data health</h2><p data-i18n="dataHealthSub">Missing fields in your source data</p></div></div>
           <div id="dataHealth" class="health-list"></div>
         </article>
