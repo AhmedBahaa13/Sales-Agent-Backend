@@ -205,9 +205,10 @@
   }
   function renderVisits(visits){
     if(!visits.length){$("recentVisits").innerHTML='<div class="empty-chart">'+esc(t("noRecentVisits"))+'</div>';return;}
+    const orderedVisits=[...visits].sort((a,b)=>Number(b.recordType==="APP_VISIT"&&b.status==="IN_PROGRESS")-Number(a.recordType==="APP_VISIT"&&a.status==="IN_PROGRESS"));
     const ar=state.language==="ar";
     const label=(en,arabic)=>ar?arabic:en;
-    $("recentVisits").innerHTML=visits.map(v=>{
+    $("recentVisits").innerHTML=orderedVisits.map(v=>{
       const rows=[
         [label("Date","التاريخ"),v.date||date(v.scheduledAt)],
         ...(v.recordType==="APP_VISIT" ? [
@@ -241,8 +242,10 @@
       const meta = v.recordType==="APP_VISIT"
         ? (v.propertyName||v.clientName||label("Property visit","زيارة عقارية"))
         : ((v.timeIn||"—")+" · "+(v.salesAgent||v.createdBy||"—"));
-      const kind = v.recordType==="APP_VISIT" ? label("App visit","زيارة من التطبيق") : (v.type||"Orientation");
-      return '<div class="recent-item orientation-record"><div><strong>'+esc(v.companyName||v.newCompanyName||t("unknown"))+'</strong><small>'+esc(v.date||date(v.scheduledAt))+' · '+esc(meta)+'</small><div class="orientation-details">'+rows.map(x=>'<span><b>'+esc(x[0])+':</b> '+esc(x[1])+'</span>').join("")+'</div></div><span class="status-pill">'+esc(kind)+'</span></div>';
+      const isCurrent = v.recordType==="APP_VISIT" && v.status==="IN_PROGRESS";
+      const kind = v.recordType==="APP_VISIT" ? statusLabel(v.status) : (v.type||"Orientation");
+      const currentLabel = isCurrent ? '<small class="current-visit-label">'+esc(label("CURRENT VISIT","الزيارة الحالية"))+'</small>' : '';
+      return '<div class="recent-item orientation-record'+(isCurrent?' pending-current':'')+'"><div>'+currentLabel+'<strong>'+esc(v.companyName||v.newCompanyName||t("unknown"))+'</strong><small>'+esc(v.date||date(v.scheduledAt))+' · '+esc(meta)+'</small><div class="orientation-details">'+rows.map(x=>'<span><b>'+esc(x[0])+':</b> '+esc(x[1])+'</span>').join("")+'</div></div><span class="status-pill '+(isCurrent?'pending':'')+'">'+esc(kind)+'</span></div>';
     }).join("");
   }
   function populateRelations(relations){
