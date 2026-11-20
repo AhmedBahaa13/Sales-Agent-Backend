@@ -66,6 +66,8 @@ app.use((req, res, next) => {
     res.setHeader("Permissions-Policy", "geolocation=(self)");
     next();
 });
+// Google Sheets snapshots are intentionally larger than normal API payloads.
+app.use("/api/sync", express.json({ limit: "20mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
