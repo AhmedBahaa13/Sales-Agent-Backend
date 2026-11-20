@@ -2,7 +2,7 @@ function normalizeEmail(value) {
     return String(value || "").trim().toLowerCase();
 }
 
-function matchesVerifiedEmail(row, email) {
+function matchesAccountEmail(row, email) {
     const trustedEmail = normalizeEmail(email);
     return Boolean(trustedEmail && normalizeEmail(row?.email) === trustedEmail);
 }
@@ -32,7 +32,7 @@ function canManageCompanyMembers(role) {
 
 module.exports = {
     normalizeEmail,
-    matchesVerifiedEmail,
+    matchesAccountEmail,
     parseCoordinate,
     buildVisitReadWhere,
     canManageCompanyMembers
