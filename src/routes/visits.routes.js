@@ -274,6 +274,7 @@ router.patch("/:id/complete", async (req, res, next) => {
         }, { maxWait: 10000, timeout: 20000 });
         return res.json({ success: true, message: "Visit completed successfully", visit: completed });
     } catch (error) {
+        if (error.status) return res.status(error.status).json({ message: error.message });
         next(error);
     }
 });
