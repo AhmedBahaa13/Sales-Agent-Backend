@@ -45,7 +45,28 @@ async function getAccess(prisma, userId) {
 router.get("/options", async (req, res, next) => {
     try {
         const access = await getAccess(req.prisma, req.userId);
-        res.json({ companies: access.companies.map(name => ({ name })), teams: access.teams });
+        const activeVisit = await req.prisma.visit.findFirst({
+            where: {
+                status: "IN_PROGRESS",
+                OR: [
+                    { createdById: req.userId },
+                    { assignments: { some: { userId: req.userId } } }
+                ]
+            },
+            orderBy: { startedAt: "desc" },
+            select: { id: true, clientName: true, propertyName: true, company: { select: { name: true } }, startedAt: true }
+        });
+        res.json({
+            companies: access.companies.map(name => ({ name })),
+            teams: access.teams,
+            activeVisit: activeVisit ? {
+                id: activeVisit.id,
+                clientName: activeVisit.clientName,
+                propertyName: activeVisit.propertyName,
+                companyName: activeVisit.company.name,
+                startedAt: activeVisit.startedAt
+            } : null
+        });
     } catch (error) { next(error); }
 });
 router.post("/", async (req, res, next) => {
@@ -76,6 +97,29 @@ router.post("/", async (req, res, next) => {
             return res.status(403).json({ message: "The selected team is not assigned to this company" });
         }
         const visit = await req.prisma.$transaction(async tx => {
+            const lockName = "brokerflow:active-visit:" + req.userId;
+            const lockResult = await tx.$queryRawUnsafe("SELECT GET_LOCK(?, 10) AS acquired", lockName);
+            if (Number(lockResult?.[0]?.acquired) !== 1) {
+                const error = new Error("A visit is already being started. Please try again.");
+                error.status = 409;
+                throw error;
+            }
+            try {
+                const activeVisit = await tx.visit.findFirst({
+                    where: {
+                        status: "IN_PROGRESS",
+                        OR: [
+                            { createdById: req.userId },
+                            { assignments: { some: { userId: req.userId } } }
+                        ]
+                    },
+                    select: { id: true, clientName: true, company: { select: { name: true } } }
+                });
+                if (activeVisit) {
+                    const error = new Error("You already have a pending visit. Finish it before starting another one.");
+                    error.status = 409;
+                    throw error;
+                }
             let company = await tx.company.findFirst({ where: { name: companyName, isActive: true }, select: { id: true, name: true } });
             if (!company) company = await tx.company.create({ data: { name: companyName }, select: { id: true, name: true } });
             await tx.companyMember.upsert({
@@ -113,6 +157,9 @@ router.post("/", async (req, res, next) => {
                 startedAt, startLatitude, startLongitude, visit.id
             );
             return visit;
+            } finally {
+                await tx.$queryRawUnsafe("SELECT RELEASE_LOCK(?) AS released", lockName);
+            }
         }, { maxWait: 10000, timeout: 20000 });
         return res.status(201).json({ success: true, message: "Visit started successfully", visit: {
             id: visit.id, companyId: visit.companyId, companyName: visit.company.name,
