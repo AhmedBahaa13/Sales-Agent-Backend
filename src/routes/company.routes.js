@@ -4,6 +4,7 @@ const {
     authenticateToken
 } = require("../middleware/auth.middleware");
 
+const { canManageCompanyMembers } = require("../utils/access-policy");
 const router = express.Router();
 
 router.use(authenticateToken);
@@ -340,7 +341,7 @@ router.get("/:companyId/members", async (req, res, next) => {
 
         const memberWhere = {
             companyId,
-            ...(["OWNER", "ADMIN"].includes(membership.role) ? {} : { userId: req.userId })
+            ...(canManageCompanyMembers(membership.role) ? {} : { userId: req.userId })
         };
         const members = await req.prisma.companyMember.findMany({
             where: memberWhere,
