@@ -20,14 +20,15 @@ async function getAccess(prisma, userId) {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, fullName: true, email: true, isActive: true } });
     if (!user || !user.isActive) { const error = new Error("User not found or inactive"); error.status = 401; throw error; }
     const isAdmin = isAdminEmail(user.email);
-    const email = normalize(user.email), fullName = normalize(user.fullName);
+    const email = normalize(user.email);
     const [dropdownRows, sourceRows, memberships, dbCompanies] = await Promise.all([
         prisma.companyDropdown.findMany({ select: { companyName: true, salesAgent: true, email: true } }),
         prisma.googleSheetRecord.findMany({ select: { companyName: true, salesAgent: true, email: true, team: true, team1: true, team2: true, team3: true, team4: true, team5: true } }),
         prisma.companyMember.findMany({ where: { userId, company: { isActive: true } }, select: { company: { select: { name: true } } } }),
         isAdmin ? prisma.company.findMany({ where: { isActive: true }, select: { name: true } }) : Promise.resolve([])
     ]);
-    const allowed = row => (email && normalize(row.email) === email) || (fullName && normalize(row.salesAgent) === fullName);
+    // Email is a verified account identifier. Never grant access by a user-editable display name.
+    const allowed = row => Boolean(email && normalize(row.email) === email);
     const dropdown = isAdmin ? dropdownRows : dropdownRows.filter(allowed);
     const source = isAdmin ? sourceRows : sourceRows.filter(allowed);
     const companies = uniqueNames([...dropdown.map(x => x.companyName), ...source.map(x => x.companyName), ...memberships.map(x => x.company.name), ...dbCompanies.map(x => x.name)]);
@@ -97,69 +98,92 @@ router.post("/", async (req, res, next) => {
             return res.status(403).json({ message: "The selected team is not assigned to this company" });
         }
         const visit = await req.prisma.$transaction(async tx => {
-            const lockName = "brokerflow:active-visit:" + req.userId;
-            const lockResult = await tx.$queryRawUnsafe("SELECT GET_LOCK(?, 10) AS acquired", lockName);
-            if (Number(lockResult?.[0]?.acquired) !== 1) {
-                const error = new Error("A visit is already being started. Please try again.");
+            // Lock the user's InnoDB row until commit. Concurrent start and finish
+            // operations for the same user are serialized without connection-scoped advisory locks.
+            const lockedUser = await tx.$queryRawUnsafe(
+                "SELECT `id` FROM `User` WHERE `id` = ? FOR UPDATE",
+                req.userId
+            );
+            if (!lockedUser.length) {
+                const error = new Error("User not found");
+                error.status = 401;
+                throw error;
+            }
+
+            const activeVisit = await tx.visit.findFirst({
+                where: {
+                    status: "IN_PROGRESS",
+                    OR: [
+                        { createdById: req.userId },
+                        { assignments: { some: { userId: req.userId } } }
+                    ]
+                },
+                select: { id: true, clientName: true, company: { select: { name: true } } }
+            });
+            if (activeVisit) {
+                const error = new Error("You already have a pending visit. Finish it before starting another one.");
                 error.status = 409;
                 throw error;
             }
-            try {
-                const activeVisit = await tx.visit.findFirst({
-                    where: {
-                        status: "IN_PROGRESS",
-                        OR: [
-                            { createdById: req.userId },
-                            { assignments: { some: { userId: req.userId } } }
-                        ]
-                    },
-                    select: { id: true, clientName: true, company: { select: { name: true } } }
+
+            let company = await tx.company.findFirst({
+                where: { name: companyName, isActive: true },
+                select: { id: true, name: true }
+            });
+            if (!company) {
+                company = await tx.company.create({
+                    data: { name: companyName },
+                    select: { id: true, name: true }
                 });
-                if (activeVisit) {
-                    const error = new Error("You already have a pending visit. Finish it before starting another one.");
-                    error.status = 409;
-                    throw error;
-                }
-            let company = await tx.company.findFirst({ where: { name: companyName, isActive: true }, select: { id: true, name: true } });
-            if (!company) company = await tx.company.create({ data: { name: companyName }, select: { id: true, name: true } });
+            }
+
             await tx.companyMember.upsert({
                 where: { companyId_userId: { companyId: company.id, userId: req.userId } },
                 update: {},
                 create: { companyId: company.id, userId: req.userId, role: access.isAdmin ? "ADMIN" : "AGENT" }
             });
+
             let team = null;
             if (teamName) {
                 team = await tx.team.upsert({
                     where: { companyId_name: { companyId: company.id, name: teamName } },
-                    update: {}, create: { companyId: company.id, name: teamName }, select: { id: true, name: true }
+                    update: {},
+                    create: { companyId: company.id, name: teamName },
+                    select: { id: true, name: true }
                 });
                 await tx.teamMember.upsert({
                     where: { teamId_userId: { teamId: team.id, userId: req.userId } },
-                    update: {}, create: { teamId: team.id, userId: req.userId, role: "MEMBER" }
+                    update: {},
+                    create: { teamId: team.id, userId: req.userId, role: "MEMBER" }
                 });
             }
-            const visit = await tx.visit.create({
+
+            return tx.visit.create({
                 data: {
-                    companyId: company.id, teamId: team ? team.id : null, createdById: req.userId,
-                    clientName, clientPhone, propertyName, propertyAddress,
-                    latitude: startLatitude, longitude: startLongitude,
-                    scheduledAt, status: "IN_PROGRESS", notes,
+                    companyId: company.id,
+                    teamId: team ? team.id : null,
+                    createdById: req.userId,
+                    clientName,
+                    clientPhone,
+                    propertyName,
+                    propertyAddress,
+                    latitude: startLatitude,
+                    longitude: startLongitude,
+                    startLatitude,
+                    startLongitude,
+                    startedAt,
+                    scheduledAt,
+                    status: "IN_PROGRESS",
+                    notes,
                     assignments: { create: { userId: req.userId } }
                 },
                 include: {
-                    company: { select: { id: true, name: true } }, team: { select: { id: true, name: true } },
+                    company: { select: { id: true, name: true } },
+                    team: { select: { id: true, name: true } },
                     createdBy: { select: { id: true, fullName: true, email: true } },
                     assignments: { include: { user: { select: { id: true, fullName: true, email: true } } } }
                 }
             });
-            await tx.$executeRawUnsafe(
-                "UPDATE `Visit` SET `startedAt` = ?, `startLatitude` = ?, `startLongitude` = ? WHERE `id` = ?",
-                startedAt, startLatitude, startLongitude, visit.id
-            );
-            return visit;
-            } finally {
-                await tx.$queryRawUnsafe("SELECT RELEASE_LOCK(?) AS released", lockName);
-            }
         }, { maxWait: 10000, timeout: 20000 });
         return res.status(201).json({ success: true, message: "Visit started successfully", visit: {
             id: visit.id, companyId: visit.companyId, companyName: visit.company.name,
@@ -198,15 +222,63 @@ router.patch("/:id/complete", async (req, res, next) => {
             return res.status(409).json({ message: "Only pending visits can be completed" });
         }
         const endedAt = new Date();
-        const changed = await req.prisma.$executeRawUnsafe(
-            "UPDATE `Visit` SET `startedAt` = COALESCE(`startedAt`, ?), `endedAt` = ?, `endLatitude` = ?, `endLongitude` = ?, `status` = 'COMPLETED', `updatedAt` = ? WHERE `id` = ? AND `status` = 'IN_PROGRESS'",
-            visit.scheduledAt, endedAt, endLatitude, endLongitude, endedAt, visitId
-        );
-        if (!changed) return res.status(409).json({ message: "This visit has already been completed" });
-        return res.json({ success: true, message: "Visit completed successfully", visit: {
-            id: visit.id, status: "COMPLETED", startedAt: visit.scheduledAt,
-            endedAt, endLatitude, endLongitude
-        } });
+        const completed = await req.prisma.$transaction(async tx => {
+            await tx.$queryRawUnsafe(
+                "SELECT `id` FROM `User` WHERE `id` = ? FOR UPDATE",
+                req.userId
+            );
+            const current = await tx.visit.findUnique({
+                where: { id: visitId },
+                select: {
+                    id: true,
+                    status: true,
+                    createdById: true,
+                    scheduledAt: true,
+                    startedAt: true,
+                    assignments: { select: { userId: true } }
+                }
+            });
+            if (!current) {
+                const error = new Error("Visit not found");
+                error.status = 404;
+                throw error;
+            }
+            const isAssigned = current.assignments.some(item => item.userId === req.userId);
+            if (current.createdById !== req.userId && !isAssigned) {
+                const error = new Error("You are not allowed to complete this visit");
+                error.status = 403;
+                throw error;
+            }
+            if (current.status !== "IN_PROGRESS") {
+                const error = new Error("Only pending visits can be completed");
+                error.status = 409;
+                throw error;
+            }
+            const changed = await tx.visit.updateMany({
+                where: { id: visitId, status: "IN_PROGRESS" },
+                data: {
+                    startedAt: current.startedAt || current.scheduledAt,
+                    endedAt,
+                    endLatitude,
+                    endLongitude,
+                    status: "COMPLETED"
+                }
+            });
+            if (changed.count !== 1) {
+                const error = new Error("This visit has already been completed");
+                error.status = 409;
+                throw error;
+            }
+            return {
+                id: current.id,
+                status: "COMPLETED",
+                startedAt: current.startedAt || current.scheduledAt,
+                endedAt,
+                endLatitude,
+                endLongitude
+            };
+        }, { maxWait: 10000, timeout: 20000 });
+        return res.json({ success: true, message: "Visit completed successfully", visit: completed });
     } catch (error) {
         next(error);
     }
