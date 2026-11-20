@@ -338,10 +338,12 @@ router.get("/:companyId/members", async (req, res, next) => {
             });
         }
 
+        const memberWhere = {
+            companyId,
+            ...(membership.role === "AGENT" ? { userId: req.userId } : {})
+        };
         const members = await req.prisma.companyMember.findMany({
-            where: {
-                companyId
-            },
+            where: memberWhere,
             include: {
                 user: {
                     select: {
