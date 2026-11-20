@@ -22,8 +22,14 @@ async function getAccess(prisma, userId) {
     const isAdmin = isAdminEmail(user.email);
     const email = normalize(user.email);
     const [dropdownRows, sourceRows, memberships, dbCompanies] = await Promise.all([
-        prisma.companyDropdown.findMany({ select: { companyName: true, salesAgent: true, email: true } }),
-        prisma.googleSheetRecord.findMany({ select: { companyName: true, salesAgent: true, email: true, team: true, team1: true, team2: true, team3: true, team4: true, team5: true } }),
+        prisma.companyDropdown.findMany({
+            where: isAdmin ? {} : { email },
+            select: { companyName: true, salesAgent: true, email: true }
+        }),
+        prisma.googleSheetRecord.findMany({
+            where: isAdmin ? {} : { email },
+            select: { companyName: true, salesAgent: true, email: true, team: true, team1: true, team2: true, team3: true, team4: true, team5: true }
+        }),
         prisma.companyMember.findMany({ where: { userId, company: { isActive: true } }, select: { company: { select: { name: true } } } }),
         isAdmin ? prisma.company.findMany({ where: { isActive: true }, select: { name: true } }) : Promise.resolve([])
     ]);
