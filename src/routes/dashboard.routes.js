@@ -155,7 +155,7 @@ function normalizeOrientationRow(row) {
     };
 }
 
-async function fetchOrientationRecords(userEmail, userFullName, isAdmin = false) {
+async function fetchOrientationRecords(userEmail, isAdmin = false) {
     try {
         const url = new URL(isAdmin ? ORIENTATIONS_ADMIN_API_URL : ORIENTATIONS_API_URL);
         if (!isAdmin) url.searchParams.set("email", userEmail);
@@ -187,10 +187,8 @@ async function fetchOrientationRecords(userEmail, userFullName, isAdmin = false)
             .map(normalizeOrientationRow);
 
         const emailKey = key(userEmail);
-        const nameKey = key(userFullName);
         const records = isAdmin ? normalized : normalized.filter(row =>
-            (row.email && key(row.email) === emailKey) ||
-            (row.salesAgent && key(row.salesAgent) === nameKey)
+            Boolean(row.email && key(row.email) === emailKey)
         );
 
         return { records, error: null, fetchedAt: new Date().toISOString() };
@@ -554,23 +552,22 @@ router.get("/overview", async (req, res, next) => {
             ? memberships.filter(item => item.companyId === requestedCompanyId)
             : memberships;
 
+        // Sales-agent memberships do not grant access to coworkers' visit details.
+        // Managers/admins need an explicit role policy; until that is implemented,
+        // non-admin accounts receive only visits they created or were assigned.
         const visitWhere = {
             companyId: { in: selectedCompanyIds },
+            ...(isAdmin ? {} : {
+                OR: [
+                    { createdById: user.id },
+                    { assignments: { some: { userId: user.id } } }
+                ]
+            }),
             ...(startDate ? { scheduledAt: { gte: startDate } } : {})
         };
         const userEmail = user.email.trim().toLowerCase();
-        const sheetWhere = isAdmin ? {} : {
-            OR: [
-                { email: userEmail },
-                { salesAgent: { equals: user.fullName } }
-            ]
-        };
-        const dropdownWhere = isAdmin ? {} : {
-            OR: [
-                { email: userEmail },
-                { salesAgent: { equals: user.fullName } }
-            ]
-        };
+        const sheetWhere = isAdmin ? {} : { email: userEmail };
+        const dropdownWhere = isAdmin ? {} : { email: userEmail };
 
         const [visits, visitsTotal, sourceRecords, dropdownRecords, syncedAt, orientationResult] = await Promise.all([
             companyIds.length
@@ -620,7 +617,7 @@ router.get("/overview", async (req, res, next) => {
                 orderBy: { syncedAt: "desc" },
                 select: { syncedAt: true }
             }),
-            fetchOrientationRecords(user.email, user.fullName, isAdmin)
+            fetchOrientationRecords(user.email, isAdmin)
         ]);
 
         const lifecycleRows = visits.length
@@ -691,7 +688,9 @@ router.get("/overview", async (req, res, next) => {
                 companyName: membership.company.name,
                 membersCount: team._count.members,
                 visitsCount: team._count.visits,
-                members: team.members.map(member => ({
+                members: team.members
+                    .filter(member => isAdmin || membership.role !== "AGENT" || member.user.id === user.id)
+                    .map(member => ({
                     id: member.user.id,
                     fullName: member.user.fullName,
                     email: member.user.email,
@@ -702,7 +701,9 @@ router.get("/overview", async (req, res, next) => {
         );
 
         const companyMembers = activeMemberships.flatMap(membership =>
-            membership.company.members.map(member => ({
+            membership.company.members
+                .filter(member => isAdmin || membership.role !== "AGENT" || member.user.id === user.id)
+                .map(member => ({
                 companyId: membership.company.id,
                 companyName: membership.company.name,
                 userId: member.user.id,
@@ -858,7 +859,7 @@ router.get("/overview", async (req, res, next) => {
                 orientationVisitsReturned: orientationRows.length,
                 role: isAdmin ? "ADMIN" : "USER",
                 dataScope: isAdmin ? "ALL" : "USER",
-                sourceRecordsScope: isAdmin ? "All Google Sheets records (Global Admin)" : "Authenticated user's email or Sales Agent name",
+                sourceRecordsScope: isAdmin ? "All Google Sheets records (Global Admin)" : "Exact authenticated email or explicit company membership",
                 sourceRecordsCount: sourceRecords.length
             },
             personalSummary: {
