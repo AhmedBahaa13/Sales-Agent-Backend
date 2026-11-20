@@ -24,9 +24,11 @@ function authenticateToken(req, res, next) {
             process.env.JWT_SECRET
         );
 
+        if (!decoded.sub || typeof decoded.sub !== "string") {
+            return res.status(401).json({ message: "Invalid authentication token" });
+        }
         req.userId = decoded.sub;
-
-        next();
+        return next();
 
     } catch (error) {
         return res.status(401).json({
