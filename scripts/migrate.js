@@ -27,10 +27,41 @@ function getConnectionOptions() {
     };
 }
 
+/**
+ * Execute an idempotent ADD COLUMN migration across MySQL/MariaDB versions.
+ * MySQL does not support ALTER TABLE ... ADD COLUMN IF NOT EXISTS.
+ * INFORMATION_SCHEMA is used to skip columns that were added by an older deployment.
+ */
+async function executeMigrationStatement(connection, statement) {
+    const normalized = statement.trim();
+    if (!normalized) return;
+
+    const addColumn = normalized.match(
+        /^ALTER\\s+TABLE\\s+`?([A-Za-z0-9_]+)`?\\s+ADD\\s+COLUMN\\s+`?([A-Za-z0-9_]+)`?\\s+([\\s\\S]+)$/i
+    );
+
+    if (addColumn) {
+        const [, tableName, columnName] = addColumn;
+        const existing = await connection.query(
+            "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1",
+            [tableName, columnName]
+        );
+
+        if (existing.length) {
+            console.log("Migration skipped existing column: " + tableName + "." + columnName);
+            return;
+        }
+    }
+
+    await connection.query(normalized);
+}
+
 async function run() {
     const connection = await mariadb.createConnection(getConnectionOptions());
     let migrationLockAcquired = false;
     const migrationLockName = "brokerflow:schema-migrations";
+
     try {
         const lockResult = await connection.query(
             "SELECT GET_LOCK(?, 30) AS acquired",
@@ -60,10 +91,16 @@ async function run() {
             if (alreadyApplied.length) continue;
 
             const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
-            const statements = sql.split(";").map(statement => statement.trim()).filter(Boolean);
+            const statements = sql
+                .replace(/^\\s*--.*$/gm, "")
+                .split(";")
+                .map(statement => statement.trim())
+                .filter(Boolean);
+
             for (const statement of statements) {
-                await connection.query(statement);
+                await executeMigrationStatement(connection, statement);
             }
+
             await connection.query(
                 "INSERT INTO `brokerflow_migrations` (`id`) VALUES (?)",
                 [file]
@@ -82,7 +119,11 @@ async function run() {
     }
 }
 
-run().catch(error => {
-    console.error("Database migration failed:", error);
-    process.exit(1);
-});
+if (require.main === module) {
+    run().catch(error => {
+        console.error("Database migration failed:", error);
+        process.exit(1);
+    });
+}
+
+module.exports = { executeMigrationStatement, getConnectionOptions, run };
