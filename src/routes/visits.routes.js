@@ -1,16 +1,12 @@
 const express = require("express");
 const { authenticateToken } = require("../middleware/auth.middleware");
 const { isAdminEmail } = require("../utils/admin-access");
+const { matchesVerifiedEmail, parseCoordinate } = require("../utils/access-policy");
 const router = express.Router();
 const TEAM_FIELDS = ["team", "team1", "team2", "team3", "team4", "team5"];
 router.use(authenticateToken);
 const clean = value => value == null || !String(value).trim() ? null : String(value).trim();
 const normalize = value => String(value || "").trim().toLocaleLowerCase();
-function coordinate(value, min, max) {
-    if (value === null || value === undefined || value === "") return null;
-    const number = Number(value);
-    return Number.isFinite(number) && number >= min && number <= max ? number : null;
-}
 function uniqueNames(values) {
     const map = new Map();
     values.forEach(value => { const name = clean(value); if (name && !map.has(normalize(name))) map.set(normalize(name), name); });
@@ -34,7 +30,7 @@ async function getAccess(prisma, userId) {
         isAdmin ? prisma.company.findMany({ where: { isActive: true }, select: { name: true } }) : Promise.resolve([])
     ]);
     // Email is a verified account identifier. Never grant access by a user-editable display name.
-    const allowed = row => Boolean(email && normalize(row.email) === email);
+    const allowed = row => matchesVerifiedEmail(row, email);
     const dropdown = isAdmin ? dropdownRows : dropdownRows.filter(allowed);
     const source = isAdmin ? sourceRows : sourceRows.filter(allowed);
     const companies = uniqueNames([...dropdown.map(x => x.companyName), ...source.map(x => x.companyName), ...memberships.map(x => x.company.name), ...dbCompanies.map(x => x.name)]);
@@ -83,8 +79,8 @@ router.post("/", async (req, res, next) => {
         const clientName = clean(body.clientName), clientPhone = clean(body.clientPhone);
         const propertyName = clean(body.propertyName), propertyAddress = clean(body.propertyAddress);
         const notes = clean(body.notes);
-        const startLatitude = coordinate(body.startLatitude ?? body.latitude, -90, 90);
-        const startLongitude = coordinate(body.startLongitude ?? body.longitude, -180, 180);
+        const startLatitude = parseCoordinate(body.startLatitude ?? body.latitude, -90, 90);
+        const startLongitude = parseCoordinate(body.startLongitude ?? body.longitude, -180, 180);
         if (!companyName || !clientName || !propertyAddress) {
             return res.status(400).json({ message: "Company, client name and property address are required" });
         }
@@ -210,8 +206,8 @@ router.post("/", async (req, res, next) => {
 router.patch("/:id/complete", async (req, res, next) => {
     try {
         const visitId = clean(req.params.id);
-        const endLatitude = coordinate(req.body?.endLatitude, -90, 90);
-        const endLongitude = coordinate(req.body?.endLongitude, -180, 180);
+        const endLatitude = parseCoordinate(req.body?.endLatitude, -90, 90);
+        const endLongitude = parseCoordinate(req.body?.endLongitude, -180, 180);
         if (endLatitude === null || endLongitude === null) {
             return res.status(400).json({ message: "Current visit end location is required" });
         }
