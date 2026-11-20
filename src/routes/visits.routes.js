@@ -1,7 +1,7 @@
 const express = require("express");
 const { authenticateToken } = require("../middleware/auth.middleware");
 const { isAdminEmail } = require("../utils/admin-access");
-const { matchesVerifiedEmail, parseCoordinate } = require("../utils/access-policy");
+const { matchesAccountEmail, parseCoordinate } = require("../utils/access-policy");
 const router = express.Router();
 const TEAM_FIELDS = ["team", "team1", "team2", "team3", "team4", "team5"];
 router.use(authenticateToken);
@@ -29,8 +29,8 @@ async function getAccess(prisma, userId) {
         prisma.companyMember.findMany({ where: { userId, company: { isActive: true } }, select: { company: { select: { name: true } } } }),
         isAdmin ? prisma.company.findMany({ where: { isActive: true }, select: { name: true } }) : Promise.resolve([])
     ]);
-    // Email is a verified account identifier. Never grant access by a user-editable display name.
-    const allowed = row => matchesVerifiedEmail(row, email);
+    // Use the authenticated account email; account verification must be enforced by the onboarding flow. Never grant access by a user-editable display name.
+    const allowed = row => matchesAccountEmail(row, email);
     const dropdown = isAdmin ? dropdownRows : dropdownRows.filter(allowed);
     const source = isAdmin ? sourceRows : sourceRows.filter(allowed);
     const companies = uniqueNames([...dropdown.map(x => x.companyName), ...source.map(x => x.companyName), ...memberships.map(x => x.company.name), ...dbCompanies.map(x => x.name)]);
