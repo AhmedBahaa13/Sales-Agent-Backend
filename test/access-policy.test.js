@@ -2,17 +2,17 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
     normalizeEmail,
-    matchesVerifiedEmail,
+    matchesAccountEmail,
     parseCoordinate,
     buildVisitReadWhere,
     canManageCompanyMembers
 } = require("../src/utils/access-policy");
 
-test("email identity is normalized but never falls back to display name", () => {
+test("account email is normalized but never falls back to display name", () => {
     assert.equal(normalizeEmail("  SALES@EXAMPLE.COM "), "sales@example.com");
-    assert.equal(matchesVerifiedEmail({ email: "Sales@example.com", salesAgent: "Ahmed" }, "sales@example.com"), true);
-    assert.equal(matchesVerifiedEmail({ email: null, salesAgent: "Ahmed" }, "sales@example.com"), false);
-    assert.equal(matchesVerifiedEmail({ email: "other@example.com", salesAgent: "Ahmed" }, "sales@example.com"), false);
+    assert.equal(matchesAccountEmail({ email: "Sales@example.com", salesAgent: "Ahmed" }, "sales@example.com"), true);
+    assert.equal(matchesAccountEmail({ email: null, salesAgent: "Ahmed" }, "sales@example.com"), false);
+    assert.equal(matchesAccountEmail({ email: "other@example.com", salesAgent: "Ahmed" }, "sales@example.com"), false);
 });
 
 test("coordinates accept only finite values in geographic range", () => {
