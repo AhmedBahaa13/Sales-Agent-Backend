@@ -1,7 +1,7 @@
 const express = require("express");
 const { authenticateToken } = require("../middleware/auth.middleware");
 const { isAdminEmail } = require("../utils/admin-access");
-const { matchesVerifiedEmail, buildVisitReadWhere } = require("../utils/access-policy");
+const { matchesAccountEmail, buildVisitReadWhere } = require("../utils/access-policy");
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -188,7 +188,7 @@ async function fetchOrientationRecords(userEmail, isAdmin = false) {
             .map(normalizeOrientationRow);
 
         const records = isAdmin ? normalized : normalized.filter(row =>
-            matchesVerifiedEmail(row, userEmail)
+            matchesAccountEmail(row, userEmail)
         );
 
         return { records, error: null, fetchedAt: new Date().toISOString() };
