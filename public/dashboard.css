@@ -44,3 +44,5 @@
 @media(max-width:600px){.admin-manager>summary{align-items:flex-start;flex-wrap:wrap}.admin-manager>summary em{margin-inline-start:0}.admin-visit-fields{grid-template-columns:1fr}}
 
 .chart-axis-label{fill:#8791a4;font-size:10px;font-variant-numeric:tabular-nums}.chart-area svg{display:block;overflow:visible}.chart-area{padding:0 2px 2px}
+
+.pending-current{background:var(--blue-soft);border:1px solid #cbd7ff;border-radius:12px;padding:13px;margin:0 0 12px}.current-visit-label{display:inline-block;color:var(--blue)!important;font-size:9px!important;font-weight:800;letter-spacing:.8px;margin:0 0 6px}.status-pill.pending{background:#e8edff;color:#405dcc;border:1px solid #cbd7ff}
