@@ -30,12 +30,12 @@ function getConnectionOptions() {
 async function run() {
     const connection = await mariadb.createConnection(getConnectionOptions());
     try {
-        await connection.query(`
-            CREATE TABLE IF NOT EXISTS `brokerflow_migrations` (
-                `id` VARCHAR(191) NOT NULL PRIMARY KEY,
-                `appliedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
-            ) ENGINE=InnoDB
-        `);
+        await connection.query(
+            "CREATE TABLE IF NOT EXISTS `brokerflow_migrations` (" +
+            "`id` VARCHAR(191) NOT NULL PRIMARY KEY, " +
+            "`appliedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)" +
+            ") ENGINE=InnoDB"
+        );
 
         const files = fs.readdirSync(MIGRATIONS_DIR)
             .filter(file => file.endsWith(".sql"))
