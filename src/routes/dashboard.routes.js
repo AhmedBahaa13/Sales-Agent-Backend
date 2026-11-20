@@ -1,6 +1,7 @@
 const express = require("express");
 const { authenticateToken } = require("../middleware/auth.middleware");
 const { isAdminEmail } = require("../utils/admin-access");
+const { matchesVerifiedEmail, buildVisitReadWhere } = require("../utils/access-policy");
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -186,9 +187,8 @@ async function fetchOrientationRecords(userEmail, isAdmin = false) {
             .filter(row => row && typeof row === "object" && !Array.isArray(row))
             .map(normalizeOrientationRow);
 
-        const emailKey = key(userEmail);
         const records = isAdmin ? normalized : normalized.filter(row =>
-            Boolean(row.email && key(row.email) === emailKey)
+            matchesVerifiedEmail(row, userEmail)
         );
 
         return { records, error: null, fetchedAt: new Date().toISOString() };
@@ -555,16 +555,12 @@ router.get("/overview", async (req, res, next) => {
         // Sales-agent memberships do not grant access to coworkers' visit details.
         // Managers/admins need an explicit role policy; until that is implemented,
         // non-admin accounts receive only visits they created or were assigned.
-        const visitWhere = {
-            companyId: { in: selectedCompanyIds },
-            ...(isAdmin ? {} : {
-                OR: [
-                    { createdById: user.id },
-                    { assignments: { some: { userId: user.id } } }
-                ]
-            }),
-            ...(startDate ? { scheduledAt: { gte: startDate } } : {})
-        };
+        const visitWhere = buildVisitReadWhere({
+            userId: user.id,
+            isGlobalAdmin: isAdmin,
+            companyIds: selectedCompanyIds,
+            startDate
+        });
         const userEmail = user.email.trim().toLowerCase();
         const sheetWhere = isAdmin ? {} : { email: userEmail };
         const dropdownWhere = isAdmin ? {} : { email: userEmail };
