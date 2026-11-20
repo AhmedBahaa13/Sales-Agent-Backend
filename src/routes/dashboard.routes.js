@@ -670,26 +670,34 @@ router.get("/overview", async (req, res, next) => {
             : null;
 
 
-        const companies = memberships.map(membership => ({
-            id: membership.company.id,
-            name: membership.company.name,
-            role: membership.role,
-            membersCount: membership.company._count.members,
-            teamsCount: membership.company._count.teams,
-            visitsCount: membership.company._count.visits,
-            createdAt: membership.company.createdAt
-        }));
+        const companies = memberships.map(membership => {
+            const ownCompanyVisits = personalVisits.filter(visit => visit.companyId === membership.company.id);
+            const ownTeamCount = membership.company.teams.filter(team =>
+                team.members.some(member => member.user.id === user.id)
+            ).length;
+            return {
+                id: membership.company.id,
+                name: membership.company.name,
+                role: membership.role,
+                membersCount: isAdmin ? membership.company._count.members : 1,
+                teamsCount: isAdmin ? membership.company._count.teams : ownTeamCount,
+                visitsCount: isAdmin ? membership.company._count.visits : ownCompanyVisits.length,
+                createdAt: membership.company.createdAt
+            };
+        });
 
         const teams = activeMemberships.flatMap(membership =>
-            membership.company.teams.map(team => ({
+            membership.company.teams
+                .filter(team => isAdmin || team.members.some(member => member.user.id === user.id))
+                .map(team => ({
                 id: team.id,
                 name: team.name,
                 companyId: membership.company.id,
                 companyName: membership.company.name,
-                membersCount: team._count.members,
-                visitsCount: team._count.visits,
+                membersCount: isAdmin ? team._count.members : 1,
+                visitsCount: isAdmin ? team._count.visits : personalVisits.filter(visit => visit.teamId === team.id).length,
                 members: team.members
-                    .filter(member => isAdmin || membership.role !== "AGENT" || member.user.id === user.id)
+                    .filter(member => isAdmin || member.user.id === user.id)
                     .map(member => ({
                     id: member.user.id,
                     fullName: member.user.fullName,
@@ -702,7 +710,7 @@ router.get("/overview", async (req, res, next) => {
 
         const companyMembers = activeMemberships.flatMap(membership =>
             membership.company.members
-                .filter(member => isAdmin || membership.role !== "AGENT" || member.user.id === user.id)
+                .filter(member => isAdmin || member.user.id === user.id)
                 .map(member => ({
                 companyId: membership.company.id,
                 companyName: membership.company.name,
@@ -869,7 +877,7 @@ router.get("/overview", async (req, res, next) => {
                 averageDurationMinutes,
                 completionRate: personalVisits.length ? Math.round(completedPersonalVisits / personalVisits.length * 100) : 0
             },
-            summary: {
+            summary: isAdmin ? {
                 companies: activeMemberships.length,
                 members: companyMembers.length,
                 teams: teams.length,
@@ -891,6 +899,28 @@ router.get("/overview", async (req, res, next) => {
                 recordsMissingEmail: missingEmailRecords,
                 recordsMissingAgent: missingAgentRecords,
                 recordsMissingCompany: missingCompanyRecords
+            } : {
+                companies: activeMemberships.length,
+                members: 1,
+                teams: teams.length,
+                visits: personalVisits.length,
+                visitsInPeriod: personalVisits.length,
+                orientationVisits: orientationRows.length,
+                orientationVisitsInPeriod: orientationRows.length,
+                completedVisits: completedPersonalVisits,
+                cancelledVisits: personalVisits.filter(visit => visit.status === "CANCELLED").length,
+                sourceRecords: sourceRecords.length,
+                sourceCompanies: uniqueByName(sourceRecords.map(row => row.companyName)).length,
+                sourceAgents: 0,
+                sourceManagers: 0,
+                sourceTeams: 0,
+                sourceGroups: 0,
+                dropdownCompanies: dropdownRecords.length,
+                dropdownDirectMatches: dropdownDirect,
+                dropdownAgentMatches: 0,
+                recordsMissingEmail: 0,
+                recordsMissingAgent: 0,
+                recordsMissingCompany: 0
             },
             charts: {
                 visitsByMonth,
@@ -920,11 +950,11 @@ router.get("/overview", async (req, res, next) => {
                 personalVisitsByCompany,
                 personalDurationBuckets
             },
-            relationships,
+            relationships: isAdmin ? relationships : {},
             companies,
             teams,
             companyMembers,
-            managerHierarchy,
+            managerHierarchy: isAdmin ? managerHierarchy : null,
             orientationVisits: orientationRows.map((row, index) => ({
                 id: row.serial || "orientation-" + index,
                 serial: row.serial,
@@ -985,7 +1015,7 @@ router.get("/overview", async (req, res, next) => {
                 orientationMissingAgent: allOrientations.filter(row => !row.salesAgent).length,
                 orientationMissingEmail: allOrientations.filter(row => !row.email).length
             },
-            lastGoogleSheetSyncAt: syncedAt?.syncedAt ?? null
+            lastGoogleSheetSyncAt: isAdmin ? (syncedAt?.syncedAt ?? null) : null
         });
     } catch (error) {
         next(error);
