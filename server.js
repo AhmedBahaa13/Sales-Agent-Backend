@@ -1,6 +1,5 @@
 
 require("dotenv").config();
-const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const myDataRoutes = require("./src/routes/my-data.routes");
@@ -9,22 +8,6 @@ const companyRoutes = require("./src/routes/company.routes");
 const sheetsSyncRoutes = require("./src/routes/sheets-sync.routes");
 const dashboardRoutes = require("./src/routes/dashboard.routes");
 const visitRoutes = require("./src/routes/visits.routes");
-async function ensureVisitLifecycleColumns(prisma) {
-    const columns = await prisma.$queryRawUnsafe("SHOW COLUMNS FROM `Visit`");
-    const existing = new Set(columns.map(column => column.Field));
-    const definitions = {
-        startedAt: "DATETIME(3) NULL", endedAt: "DATETIME(3) NULL",
-        startLatitude: "DECIMAL(10,7) NULL", startLongitude: "DECIMAL(10,7) NULL",
-        endLatitude: "DECIMAL(10,7) NULL", endLongitude: "DECIMAL(10,7) NULL"
-    };
-    for (const [name, definition] of Object.entries(definitions)) {
-        if (!existing.has(name)) {
-            await prisma.$executeRawUnsafe("ALTER TABLE `Visit` ADD COLUMN `" + name + "` " + definition);
-            console.log("Added Visit." + name + " lifecycle column");
-        }
-    }
-}
-
 async function startServer() {
     if (!process.env.DB_CA) {
     throw new Error("DB_CA is missing");
@@ -70,13 +53,22 @@ const adapter = new PrismaMariaDb({
 
     const prisma = new PrismaClient({ adapter });
     await prisma.$connect();
-    await ensureVisitLifecycleColumns(prisma);
 
     console.log("Database connected successfully");
 
     const app = express();
 
-app.use(express.json({ limit: "10mb" }));
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Permissions-Policy", "geolocation=(self)");
+    next();
+});
+// Google Sheets snapshots are intentionally larger than normal API payloads.
+app.use("/api/sync", express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
     app.use((req, res, next) => {
@@ -84,11 +76,22 @@ app.use(express.static(path.join(__dirname, "public")));
         next();
     });
 
-    app.get("/health", (req, res) => {
-        res.json({
-            status: "OK",
-            service: "BrokerFlow API"
-        });
+    app.get("/health", async (req, res) => {
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            return res.json({
+                status: "OK",
+                database: "connected",
+                service: "BrokerFlow API"
+            });
+        } catch (error) {
+            console.error("Health check database probe failed:", error.message);
+            return res.status(503).json({
+                status: "DEGRADED",
+                database: "unavailable",
+                service: "BrokerFlow API"
+            });
+        }
     });
 
     app.use("/api/auth", authRoutes);

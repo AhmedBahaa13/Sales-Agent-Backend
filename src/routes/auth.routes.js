@@ -24,6 +24,11 @@ function generateToken(userId) {
 
 router.post("/register", async (req, res, next) => {
     try {
+        // Public registration is opt-in. Production deployments should provision
+        // accounts through a controlled onboarding process.
+        if (String(process.env.ALLOW_PUBLIC_REGISTRATION || "").toLowerCase() !== "true") {
+            return res.status(403).json({ message: "Public registration is disabled. Contact your administrator." });
+        }
         const {
             fullName,
             email,

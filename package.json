@@ -4,9 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test test/*.test.js",
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "prestart": "node scripts/migrate.js",
+    "check:syntax": "node --check server.js && node --check src/routes/auth.routes.js && node --check src/routes/company.routes.js && node --check src/routes/dashboard.routes.js && node --check src/routes/visits.routes.js && node --check src/middleware/auth.middleware.js && node --check scripts/migrate.js",
+    "audit": "npm audit --audit-level=high"
   },
   "keywords": [],
   "author": "",
@@ -29,5 +32,8 @@
   "allowScripts": {
     "prisma@7.10.1": true,
     "@prisma/engines@7.10.1": true
+  },
+  "overrides": {
+    "effect": "3.22.2"
   }
 }

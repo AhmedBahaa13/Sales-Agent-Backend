@@ -4,6 +4,7 @@ const {
     authenticateToken
 } = require("../middleware/auth.middleware");
 
+const { canManageCompanyMembers } = require("../utils/access-policy");
 const router = express.Router();
 
 router.use(authenticateToken);
@@ -128,61 +129,27 @@ router.get("/", async (req, res, next) => {
 router.get("/dropdown", async (req, res, next) => {
     try {
         const user = await req.prisma.user.findUnique({
-            where: {
-                id: req.userId
-            },
-            select: {
-                email: true,
-                fullName: true
-            }
+            where: { id: req.userId },
+            select: { id: true, email: true }
         });
+        if (!user) return res.status(401).json({ message: "User not found" });
 
-        if (!user) {
-            return res.status(404).json({
-                message: "User not found"
-            });
-        }
-
-        const userEmail = user.email?.trim().toLowerCase() || "";
-        const userName = user.fullName?.trim() || "";
-
-        const normalize = value =>
-            String(value || "").trim().toLowerCase();
-
-        // 1. Direct email matching
-        const directRecords = userEmail
-            ? await req.prisma.companyDropdown.findMany({
-                where: {
-                    email: userEmail
-                },
-                orderBy: {
-                    companyName: "asc"
-                }
+        const userEmail = user.email.trim().toLowerCase();
+        const [emailRecords, memberships] = await Promise.all([
+            req.prisma.companyDropdown.findMany({
+                where: { email: userEmail },
+                orderBy: { companyName: "asc" }
+            }),
+            req.prisma.companyMember.findMany({
+                where: { userId: user.id, company: { isActive: true } },
+                select: { company: { select: { id: true, name: true } } }
             })
-            : [];
+        ]);
 
-        // 2. Match by Sales Agent name
-        const agentRecords = userName
-            ? await req.prisma.companyDropdown.findMany({
-                where: {
-                    salesAgent: {
-                        equals: userName
-                    }
-                },
-                orderBy: {
-                    companyName: "asc"
-                }
-            })
-            : [];
-
-        const warnings = [];
-        const companiesMap = new Map();
-
-        // 3. Add direct email matches
-        for (const record of directRecords) {
-            const key = normalize(record.companyName);
-
-            companiesMap.set(key, {
+        const companies = new Map();
+        for (const record of emailRecords) {
+            const key = record.companyName.trim().toLocaleLowerCase();
+            companies.set(key, {
                 id: record.id,
                 dropdownId: record.dropdownId,
                 companyName: record.companyName,
@@ -192,59 +159,28 @@ router.get("/dropdown", async (req, res, next) => {
                 warnings: []
             });
         }
-
-        // 4. Add Sales Agent matches
-        for (const record of agentRecords) {
-            const key = normalize(record.companyName);
-
-            if (companiesMap.has(key)) continue;
-
-            const missingEmail = !record.email;
-
-            companiesMap.set(key, {
-                id: record.id,
-                dropdownId: record.dropdownId,
-                companyName: record.companyName,
-                salesAgent: record.salesAgent,
-                email: record.email,
-                accessType: "AGENT_MATCH",
-                warnings: missingEmail
-                    ? [
-                        "This company has no email assigned. Access was matched through Sales Agent name."
-                    ]
-                    : [
-                        "Access was matched through Sales Agent name. User email differs from the assigned email."
-                    ]
-            });
+        for (const membership of memberships) {
+            const company = membership.company;
+            const key = company.name.trim().toLocaleLowerCase();
+            if (!companies.has(key)) {
+                companies.set(key, {
+                    id: company.id,
+                    dropdownId: null,
+                    companyName: company.name,
+                    salesAgent: null,
+                    email: userEmail,
+                    accessType: "MEMBERSHIP",
+                    warnings: []
+                });
+            }
         }
-
-        // 5. Warn if agent is linked to multiple emails
-        const agentEmails = [
-            ...new Set(
-                agentRecords
-                    .map(record => normalize(record.email))
-                    .filter(Boolean)
-            )
-        ];
-
-        if (agentEmails.length > 1) {
-            warnings.push({
-                type: "MULTIPLE_AGENT_EMAILS",
-                salesAgent: userName,
-                message: "This Sales Agent is linked to multiple emails in the Dropdown sheet."
-            });
-        }
-
-        const companies = [...companiesMap.values()];
 
         return res.json({
             userEmail,
-            userName,
-            count: companies.length,
-            companies,
-            warnings
+            count: companies.size,
+            companies: [...companies.values()],
+            warnings: []
         });
-
     } catch (error) {
         next(error);
     }
@@ -403,10 +339,12 @@ router.get("/:companyId/members", async (req, res, next) => {
             });
         }
 
+        const memberWhere = {
+            companyId,
+            ...(canManageCompanyMembers(membership.role) ? {} : { userId: req.userId })
+        };
         const members = await req.prisma.companyMember.findMany({
-            where: {
-                companyId
-            },
+            where: memberWhere,
             include: {
                 user: {
                     select: {
