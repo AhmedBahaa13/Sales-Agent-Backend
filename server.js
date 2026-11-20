@@ -58,7 +58,15 @@ const adapter = new PrismaMariaDb({
 
     const app = express();
 
-app.use(express.json({ limit: "10mb" }));
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Permissions-Policy", "geolocation=(self)");
+    next();
+});
+app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
     app.use((req, res, next) => {
@@ -66,11 +74,22 @@ app.use(express.static(path.join(__dirname, "public")));
         next();
     });
 
-    app.get("/health", (req, res) => {
-        res.json({
-            status: "OK",
-            service: "BrokerFlow API"
-        });
+    app.get("/health", async (req, res) => {
+        try {
+            await prisma.$queryRaw`SELECT 1`;
+            return res.json({
+                status: "OK",
+                database: "connected",
+                service: "BrokerFlow API"
+            });
+        } catch (error) {
+            console.error("Health check database probe failed:", error.message);
+            return res.status(503).json({
+                status: "DEGRADED",
+                database: "unavailable",
+                service: "BrokerFlow API"
+            });
+        }
     });
 
     app.use("/api/auth", authRoutes);
