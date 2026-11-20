@@ -641,7 +641,11 @@ router.get("/overview", async (req, res, next) => {
         }
         const personalVisits = visits.filter(visit =>
             visit.createdById === user.id || visit.assignments.some(item => item.user.id === user.id)
-        );
+        ).sort((a, b) => {
+            const activeDifference = Number(b.status === "IN_PROGRESS") - Number(a.status === "IN_PROGRESS");
+            if (activeDifference) return activeDifference;
+            return new Date(b.startedAt || b.scheduledAt).getTime() - new Date(a.startedAt || a.scheduledAt).getTime();
+        });
         const personalDurations = personalVisits.map(getDurationMinutes).filter(value => value !== null);
         const averageDurationMinutes = personalDurations.length
             ? Math.round(personalDurations.reduce((sum, value) => sum + value, 0) / personalDurations.length)
