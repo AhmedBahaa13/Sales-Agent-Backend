@@ -4,10 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test",
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "prestart": "node scripts/migrate.js"
+    "prestart": "node scripts/migrate.js",
+    "check:syntax": "node --check server.js && node --check src/routes/auth.routes.js && node --check src/routes/company.routes.js && node --check src/routes/dashboard.routes.js && node --check src/routes/visits.routes.js && node --check src/middleware/auth.middleware.js && node --check scripts/migrate.js"
   },
   "keywords": [],
   "author": "",
