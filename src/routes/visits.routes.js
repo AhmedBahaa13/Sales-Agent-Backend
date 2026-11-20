@@ -209,18 +209,6 @@ router.patch("/:id/complete", async (req, res, next) => {
         if (endLatitude === null || endLongitude === null) {
             return res.status(400).json({ message: "Current visit end location is required" });
         }
-        const visit = await req.prisma.visit.findUnique({
-            where: { id: visitId },
-            select: { id: true, status: true, createdById: true, scheduledAt: true, assignments: { select: { userId: true } } }
-        });
-        if (!visit) return res.status(404).json({ message: "Visit not found" });
-        const isAssigned = visit.assignments.some(item => item.userId === req.userId);
-        if (visit.createdById !== req.userId && !isAssigned) {
-            return res.status(403).json({ message: "You are not allowed to complete this visit" });
-        }
-        if (visit.status !== "IN_PROGRESS") {
-            return res.status(409).json({ message: "Only pending visits can be completed" });
-        }
         const endedAt = new Date();
         const completed = await req.prisma.$transaction(async tx => {
             await tx.$queryRawUnsafe(
