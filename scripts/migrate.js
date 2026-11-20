@@ -29,7 +29,18 @@ function getConnectionOptions() {
 
 async function run() {
     const connection = await mariadb.createConnection(getConnectionOptions());
+    let migrationLockAcquired = false;
+    const migrationLockName = "brokerflow:schema-migrations";
     try {
+        const lockResult = await connection.query(
+            "SELECT GET_LOCK(?, 30) AS acquired",
+            [migrationLockName]
+        );
+        migrationLockAcquired = Number(lockResult[0]?.acquired) === 1;
+        if (!migrationLockAcquired) {
+            throw new Error("Could not acquire the database migration lock");
+        }
+
         await connection.query(
             "CREATE TABLE IF NOT EXISTS `brokerflow_migrations` (" +
             "`id` VARCHAR(191) NOT NULL PRIMARY KEY, " +
@@ -60,6 +71,13 @@ async function run() {
             console.log("Database migration applied: " + file);
         }
     } finally {
+        if (migrationLockAcquired) {
+            try {
+                await connection.query("SELECT RELEASE_LOCK(?) AS released", [migrationLockName]);
+            } catch (releaseError) {
+                console.error("Could not release migration lock:", releaseError.message);
+            }
+        }
         await connection.end();
     }
 }
