@@ -123,7 +123,11 @@ router.get("/", async (req, res, next) => {
     }
 });
 
-
+router.get("/companies", async (req, res, next) => {
+    const companies = await req.prisma.company.findmany();
+    res.status(200).json({companies})
+    
+})
 
 
 router.get("/dropdown", async (req, res, next) => {
