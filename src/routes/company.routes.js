@@ -124,14 +124,25 @@ router.get("/", async (req, res, next) => {
 });
 
 router.get("/all", async (req, res, next) => {
-    const companies = await req.prisma.company.findmany();
-      res.status(200).json({
+    try {
+        const companies = await req.prisma.company.findMany({
+            where: {
+                isActive: true
+            },
+            orderBy: {
+                createdAt: "desc"
+            }
+        });
+
+        return res.json({
             success: true,
             count: companies.length,
-            data: companies
+            companies
         });
-    
-})
+    } catch (error) {
+        next(error);
+    }
+});
 
 
 router.get("/dropdown", async (req, res, next) => {
