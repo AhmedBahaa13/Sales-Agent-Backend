@@ -125,7 +125,7 @@ router.get("/", async (req, res, next) => {
 
 router.get("/all", async (req, res, next) => {
     try {
-        const companies = await req.prisma.company.findMany({
+        const companies = await req.prisma.companyDropdown.findMany({
             where: {
                 isActive: true
             },
