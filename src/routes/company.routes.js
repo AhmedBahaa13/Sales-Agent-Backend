@@ -123,31 +123,72 @@ router.get("/", async (req, res, next) => {
     }
 });
 
+
+// GET /api/companies/dropdown
+// Return all unique companies imported from Google Sheets.
 router.get("/all", async (req, res, next) => {
     try {
-        const companies = await req.prisma.companyDropdown.findMany({
-            where: {
-                isActive: true
+        const records = await req.prisma.companyDropdown.findMany({
+            select: {
+                id: true,
+                dropdownId: true,
+                companyName: true,
+                salesAgent: true
             },
             orderBy: {
-                createdAt: "desc"
+                companyName: "asc"
             }
         });
 
+        // Remove duplicate company names while preserving their sales agents.
+        const companiesMap = new Map();
+
+        for (const record of records) {
+            const companyName = record.companyName.trim();
+
+            if (!companyName) continue;
+
+            const key = companyName.toLowerCase();
+
+            if (!companiesMap.has(key)) {
+                companiesMap.set(key, {
+                    id: record.id,
+                    dropdownId: record.dropdownId,
+                    companyName,
+                    salesAgents: []
+                });
+            }
+
+            const company = companiesMap.get(key);
+
+            if (
+                record.salesAgent &&
+                !company.salesAgents.includes(record.salesAgent.trim())
+            ) {
+                company.salesAgents.push(record.salesAgent.trim());
+            }
+        }
+
+        const companies = [...companiesMap.values()];
+
         return res.json({
             success: true,
+            source: "GOOGLE_SHEETS_DROPDOWN",
             count: companies.length,
             companies
         });
+
     } catch (error) {
         next(error);
     }
 });
 
 
+
 router.get("/dropdown", async (req, res, next) => {
     try {
         const user = await req.prisma.user.findUnique({
+            where: { id: req.userId },
             select: { id: true, email: true }
         });
         if (!user) return res.status(401).json({ message: "User not found" });
