@@ -148,7 +148,6 @@ router.get("/all", async (req, res, next) => {
 router.get("/dropdown", async (req, res, next) => {
     try {
         const user = await req.prisma.user.findUnique({
-            where: { id: req.userId },
             select: { id: true, email: true }
         });
         if (!user) return res.status(401).json({ message: "User not found" });
