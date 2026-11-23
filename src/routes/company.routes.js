@@ -125,7 +125,11 @@ router.get("/", async (req, res, next) => {
 
 router.get("/companies", async (req, res, next) => {
     const companies = await req.prisma.company.findmany();
-    res.status(200).json({companies})
+      res.status(200).json({
+            success: true,
+            count: companies.length,
+            data: companies
+        });
     
 })
 

@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "start": "node server.js",
-    "dev": "node --watch server.js",
+    "dev": "nodemon server.js",
     "prestart": "node scripts/migrate.js",
     "check:syntax": "node --check server.js && node --check src/routes/auth.routes.js && node --check src/routes/company.routes.js && node --check src/routes/dashboard.routes.js && node --check src/routes/visits.routes.js && node --check src/middleware/auth.middleware.js && node --check scripts/migrate.js",
     "audit": "npm audit --audit-level=high"
@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "nodemon": "^3.1.14",
     "prisma": "^7.10.1",
     "typescript": "^7.0.2"
   },
