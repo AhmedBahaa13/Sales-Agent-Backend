@@ -120,7 +120,7 @@ router.get("/overview", async (req, res, next) => {
         const sheetWhere = isAdmin ? {} : { email: userEmail };
         const dropdownWhere = isAdmin ? {} : { email: userEmail };
 
-        const [visits, visitsTotal, sourceRecords, dropdownRecords, syncedAt, orientationResult] = await Promise.all([
+        const [visits, visitsTotal, sourceRecords, dropdownRecords, syncedAt, orientationResult, appActivities] = await Promise.all([
             companyIds.length
                 ? req.prisma.visit.findMany({
                     where: visitWhere,
