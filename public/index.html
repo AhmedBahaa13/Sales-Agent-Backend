@@ -67,7 +67,7 @@
       </section>
 
       <section id="kpiGrid" class="kpi-grid">
-        <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+        <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton kpi-wide"></div>
       </section>
 
       <section id="adminVisitsSection" class="panel admin-visits-panel hidden">
@@ -85,7 +85,11 @@
 
       <section class="content-grid">
         <article class="panel span-2">
-          <div class="panel-head"><div><h2 data-i18n="visitTrend">Visit activity</h2><p data-i18n="visitTrendSub">Monthly visit volume in the selected period</p></div><span class="panel-icon">↗</span></div>
+          <div class="panel-head"><div><h2 data-i18n="activityBreakdown">Activity breakdown</h2><p data-i18n="activityBreakdownSub">Meetings, visits, orientations, workshops and ads in the selected period</p></div><span class="panel-icon">▥</span></div>
+          <div id="activityBreakdown" class="bar-list"></div>
+        </article>
+        <article class="panel span-2">
+          <div class="panel-head"><div><h2 data-i18n="visitTrend">Activity trend</h2><p data-i18n="visitTrendSub">Monthly visit volume in the selected period</p></div><span class="panel-icon">↗</span></div>
           <div id="visitTrend" class="chart-area"></div>
         </article>
         <article class="panel">
