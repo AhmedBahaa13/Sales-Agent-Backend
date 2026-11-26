@@ -238,22 +238,22 @@ router.get("/overview", async (req, res, next) => {
             ? buildManagerVisitHierarchy(orientationRows, sourceRecords, visits)
             : null;
 
-        const countActivityType = predicate => orientationRows.filter(row => predicate(row.type)).length;
         const typeKey = value => clean(value)?.toLocaleLowerCase() || "";
-        const legacyMeetings = countActivityType(value => typeKey(value).includes("meeting"));
-        const legacyVisits = countActivityType(value => typeKey(value).includes("visit"));
-        const legacyOrientations = countActivityType(value => typeKey(value).includes("orientation"));
-        const legacyWorkshops = countActivityType(value => typeKey(value).includes("workshop"));
-        const legacyAds = countActivityType(value => {
-            const type = typeKey(value);
-            return ["ad", "ads", "advertisement", "advertisements"].includes(type) || type.includes("campaign");
-        });
+        const legacyActivityCounts = orientationRows.reduce((counts, row) => {
+            const type = typeKey(row.type);
+            if (type.includes("meeting")) counts.meetings += 1;
+            else if (type.includes("visit")) counts.visits += 1;
+            else if (type.includes("workshop")) counts.workshops += 1;
+            else if (["ad", "ads", "advertisement", "advertisements"].includes(type) || type.includes("campaign")) counts.ads += 1;
+            else counts.orientations += 1;
+            return counts;
+        }, { meetings: 0, visits: 0, orientations: 0, workshops: 0, ads: 0 });
         const activityMetrics = {
-            meetings: legacyMeetings,
-            visits: (isAdmin ? visits.length : personalVisits.length) + legacyVisits,
-            orientations: legacyOrientations + appActivities.filter(item => item.activityType === "ORIENTATION").length,
-            workshops: legacyWorkshops + appActivities.filter(item => item.activityType === "WORKSHOP").length,
-            ads: legacyAds
+            meetings: legacyActivityCounts.meetings,
+            visits: (isAdmin ? visits.length : personalVisits.length) + legacyActivityCounts.visits,
+            orientations: legacyActivityCounts.orientations + appActivities.filter(item => item.activityType === "ORIENTATION").length,
+            workshops: legacyActivityCounts.workshops + appActivities.filter(item => item.activityType === "WORKSHOP").length,
+            ads: legacyActivityCounts.ads
         };
 
         const activityMonthCounts = new Map();
