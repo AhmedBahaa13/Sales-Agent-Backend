@@ -168,7 +168,25 @@ router.get("/overview", async (req, res, next) => {
                 orderBy: { syncedAt: "desc" },
                 select: { syncedAt: true }
             }),
-            fetchOrientationRecords(user.email, isAdmin)
+            fetchOrientationRecords(user.email, isAdmin),
+            req.prisma.brokerActivity.findMany({
+                where: {
+                    ...(isAdmin ? {} : { userId: user.id }),
+                    ...(startDate ? { createdAt: { gte: startDate } } : {})
+                },
+                select: {
+                    id: true,
+                    userId: true,
+                    activityType: true,
+                    brokerType: true,
+                    companyName: true,
+                    brokerAdmin: true,
+                    requestNumber: true,
+                    createdAt: true,
+                    user: { select: { fullName: true, email: true } }
+                },
+                orderBy: { createdAt: "desc" }
+            })
         ]);
 
         const lifecycleRows = visits.length
@@ -219,6 +237,23 @@ router.get("/overview", async (req, res, next) => {
         const managerHierarchy = isAdmin
             ? buildManagerVisitHierarchy(orientationRows, sourceRecords, visits)
             : null;
+
+        const countActivityType = predicate => orientationRows.filter(row => predicate(row.type)).length;
+        const typeKey = value => clean(value)?.toLocaleLowerCase() || "";
+        const legacyMeetings = countActivityType(value => typeKey(value).includes("meeting"));
+        const legacyOrientations = countActivityType(value => typeKey(value).includes("orientation"));
+        const legacyWorkshops = countActivityType(value => typeKey(value).includes("workshop"));
+        const legacyAds = countActivityType(value => {
+            const type = typeKey(value);
+            return ["ad", "ads", "advertisement", "advertisements"].includes(type) || type.includes("campaign");
+        });
+        const activityMetrics = {
+            meetings: legacyMeetings,
+            visits: isAdmin ? visits.length : personalVisits.length,
+            orientations: legacyOrientations + appActivities.filter(item => item.activityType === "ORIENTATION").length,
+            workshops: legacyWorkshops + appActivities.filter(item => item.activityType === "WORKSHOP").length,
+            ads: legacyAds
+        };
 
 
         const companies = memberships.map(membership => {
@@ -506,6 +541,19 @@ router.get("/overview", async (req, res, next) => {
             teams,
             companyMembers,
             managerHierarchy: isAdmin ? managerHierarchy : null,
+            activityMetrics,
+            appActivities: appActivities.map(activity => ({
+                id: activity.id,
+                recordType: "ORIENTATION",
+                activityType: activity.activityType,
+                brokerType: activity.brokerType,
+                companyName: activity.companyName,
+                brokerAdmin: activity.brokerAdmin,
+                requestNumber: activity.requestNumber,
+                createdAt: activity.createdAt,
+                salesAgent: activity.user.fullName,
+                email: activity.user.email
+            })),
             orientationVisits: orientationRows.map((row, index) => ({
                 id: row.serial || "orientation-" + index,
                 serial: row.serial,
