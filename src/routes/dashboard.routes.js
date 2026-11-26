@@ -241,6 +241,7 @@ router.get("/overview", async (req, res, next) => {
         const countActivityType = predicate => orientationRows.filter(row => predicate(row.type)).length;
         const typeKey = value => clean(value)?.toLocaleLowerCase() || "";
         const legacyMeetings = countActivityType(value => typeKey(value).includes("meeting"));
+        const legacyVisits = countActivityType(value => typeKey(value).includes("visit"));
         const legacyOrientations = countActivityType(value => typeKey(value).includes("orientation"));
         const legacyWorkshops = countActivityType(value => typeKey(value).includes("workshop"));
         const legacyAds = countActivityType(value => {
@@ -249,7 +250,7 @@ router.get("/overview", async (req, res, next) => {
         });
         const activityMetrics = {
             meetings: legacyMeetings,
-            visits: isAdmin ? visits.length : personalVisits.length,
+            visits: (isAdmin ? visits.length : personalVisits.length) + legacyVisits,
             orientations: legacyOrientations + appActivities.filter(item => item.activityType === "ORIENTATION").length,
             workshops: legacyWorkshops + appActivities.filter(item => item.activityType === "WORKSHOP").length,
             ads: legacyAds
