@@ -1,5 +1,5 @@
 -- Persist Orientation and Workshop submissions made by authenticated sales agents.
-CREATE TABLE `broker_activity` (
+CREATE TABLE IF NOT EXISTS `broker_activity` (
     `id` VARCHAR(191) NOT NULL,
     `userId` VARCHAR(191) NOT NULL,
     `activityType` VARCHAR(32) NOT NULL,
