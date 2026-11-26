@@ -44,6 +44,7 @@ model User {
   teamMemberships TeamMember[]
   createdVisits   Visit[]           @relation("VisitCreator")
   assignments     VisitAssignment[]
+  brokerActivities BrokerActivity[]
 }
 
 model Company {
@@ -186,4 +187,23 @@ model CompanyDropdown {
   @@index([email])
   @@index([companyName])
   @@map("company_dropdown")
+}
+
+
+model BrokerActivity {
+  id            String   @id @default(cuid())
+  userId        String
+  activityType  String   @db.VarChar(32)
+  brokerType    String?  @db.VarChar(32)
+  companyName   String   @db.VarChar(255)
+  brokerAdmin   String   @db.VarChar(150)
+  requestNumber String?  @db.VarChar(100)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @db.DateTime(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, activityType, createdAt])
+  @@index([companyName])
+  @@map("broker_activity")
 }
