@@ -290,6 +290,18 @@
     $("existingCompany").required=isOrientation&&brokerType==="EXISTING_BROKER";
     $("eligibleBroker").required=!isOrientation;
     renderActivityCompanyOptions();
+    updateActivitySubmitState();
+  }
+  function updateActivitySubmitState(){
+    if(!activityOptionsCache){$("saveActivityBtn").disabled=true;return;}
+    const type=$("activityType").value;
+    const brokerType=$("brokerType").value;
+    const companyName=type==="WORKSHOP"
+      ? $("eligibleBroker").value
+      : brokerType==="NEW_BROKER"
+        ? $("newCompanyName").value.trim()
+        : $("existingCompany").value;
+    $("saveActivityBtn").disabled=!companyName||!$("brokerAdmin").value.trim();
   }
   function renderActivityCompanyOptions(){
     if(!activityOptionsCache)return;
@@ -306,6 +318,7 @@
       $("eligibleEmpty").textContent=t("noEligibleBrokers");
       $("eligibleEmpty").classList.toggle("hidden",eligible.length>0);
     }
+    updateActivitySubmitState();
   }
   async function loadActivityOptions(){
     $("activityFormError").textContent="";
@@ -313,7 +326,7 @@
     try{
       activityOptionsCache=await api("/api/activities/options");
       applyActivityMode();
-      $("saveActivityBtn").disabled=false;
+      updateActivitySubmitState();
     }catch(error){
       $("activityFormError").textContent=error.message||t("networkError");
     }
@@ -366,8 +379,8 @@
     }catch(error){
       $("activityFormError").textContent=error.message||t("networkError");
     }finally{
-      button.disabled=false;
       button.textContent=t("saveActivity");
+      updateActivitySubmitState();
       $("cancelActivityBtn").disabled=false;
       $("closeActivityBtn").disabled=false;
     }
@@ -390,6 +403,10 @@
   $("activityForm").addEventListener("submit",saveActivity);
   $("activityType").addEventListener("change",applyActivityMode);
   $("brokerType").addEventListener("change",applyActivityMode);
+  ["newCompanyName","existingCompany","eligibleBroker","brokerAdmin"].forEach(id=>{
+    $(id).addEventListener("input",updateActivitySubmitState);
+    $(id).addEventListener("change",updateActivitySubmitState);
+  });
   $("companySearch").addEventListener("input",renderActivityCompanyOptions);
   $("eligibleSearch").addEventListener("input",renderActivityCompanyOptions);
   $("loginForm").addEventListener("submit",login);$("logoutBtn").addEventListener("click",logout);$("refreshBtn").addEventListener("click",()=>loadDashboard(true));$("periodFilter").addEventListener("change",()=>loadDashboard());$("companyFilter").addEventListener("change",()=>loadDashboard());$("relationshipFilter").addEventListener("change",()=>renderRelations(state.data?.relationships||{}));$("languageBtn").addEventListener("click",()=>setLanguage(state.language==="en"?"ar":"en"));
