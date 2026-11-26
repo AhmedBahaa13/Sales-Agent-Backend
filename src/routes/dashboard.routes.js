@@ -255,6 +255,21 @@ router.get("/overview", async (req, res, next) => {
             ads: legacyAds
         };
 
+        const activityMonthCounts = new Map();
+        const addActivityMonth = value => {
+            if (!value) return;
+            const date = value instanceof Date ? value : new Date(value);
+            if (Number.isNaN(date.getTime())) return;
+            const month = monthKey(date);
+            activityMonthCounts.set(month, (activityMonthCounts.get(month) || 0) + 1);
+        };
+        visits.forEach(visit => addActivityMonth(visit.startedAt || visit.scheduledAt));
+        orientationRows.forEach(row => addActivityMonth(row.parsedDate));
+        appActivities.forEach(activity => addActivityMonth(activity.createdAt));
+        const activityByMonth = [...activityMonthCounts.entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([label, value]) => ({ label, value }));
+
 
         const companies = memberships.map(membership => {
             const ownCompanyVisits = personalVisits.filter(visit => visit.companyId === membership.company.id);
@@ -510,6 +525,7 @@ router.get("/overview", async (req, res, next) => {
             },
             charts: {
                 visitsByMonth,
+                activityByMonth,
                 visitsByStatus,
                 visitsByCompany,
                 visitsByTeam,
