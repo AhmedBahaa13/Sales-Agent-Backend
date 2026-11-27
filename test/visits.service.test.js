@@ -14,7 +14,7 @@ function baseVisitInput(overrides = {}) {
         clientEmail: "client@example.com",
         source: "DIRECT",
         sourceDetails: {
-            sourceType: "Referral",
+            sourceType: "REFERRAL",
             name: "Referrer One",
             phone: "01111111111",
             details: "Introduced by an existing customer"
@@ -47,7 +47,7 @@ function transactionPrisma(txOverrides = {}) {
                     notes: data.notes,
                     createdAt: new Date("2026-11-27T10:00:00.000Z"),
                     client: { id: data.clientId, name: "Client One", phone: "01000000000", email: "client@example.com" },
-                    clientSource: { id: data.clientSourceId, sourceType: "Referral", name: "Referrer One", phone: "01111111111", details: "Introduced" },
+                    clientSource: { id: data.clientSourceId, sourceType: "REFERRAL", name: "Referrer One", phone: "01111111111", details: "Introduced" },
                     sales: { id: data.salesId, fullName: "Sales One" }
                 };
             },
@@ -76,7 +76,7 @@ function transactionPrisma(txOverrides = {}) {
                 return { id: "source-1", ...data };
             },
             findFirst: async () => ({
-                id: "source-1", sourceType: "Referral", name: "Referrer One",
+                id: "source-1", sourceType: "REFERRAL", name: "Referrer One",
                 phone: "01111111111", details: "Introduced"
             })
         },
@@ -105,7 +105,7 @@ test("direct visit requires source type and source name", () => {
         () => normalizeVisitInput({
             clientName: "Client One",
             source: "DIRECT",
-            sourceDetails: { sourceType: "Referral" }
+            sourceDetails: { sourceType: "REFERRAL" }
         }),
         error => error.status === 400
     );
@@ -202,7 +202,7 @@ test("Sales Men see only their own saved sources and canCreateVisit", async () =
         clientSource: {
             findMany: async ({ where }) => {
                 assert.deepEqual(where, { createdById: "sales-1" });
-                return [{ id: "source-1", sourceType: "Referral", name: "Referrer" }];
+                return [{ id: "source-1", sourceType: "REFERRAL", name: "Referrer" }];
             }
         }
     };
