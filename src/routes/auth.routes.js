@@ -152,7 +152,7 @@ router.post("/refresh", async (req, res, next) => {
         const rotated = await req.prisma.$transaction(async tx => {
             const revoked = await tx.authSession.updateMany({
                 where: { id: oldSession.id, revokedAt: null },
-                data: { revokedAt: new Date() }
+                data: { revokedAt: new Date(), lastUsedAt: new Date() }
             });
             if (revoked.count !== 1) return null;
             return createSession(tx, oldSession.userId);
