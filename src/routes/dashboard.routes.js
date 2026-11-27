@@ -71,7 +71,7 @@ router.get("/overview", async (req, res, next) => {
 
         const [salesUsers, teams] = await Promise.all([
             req.prisma.user.findMany({
-                where: { role: "SALES_MAN", isActive: true },
+                where: { role: "SALES_MAN" },
                 select: { id: true, fullName: true, email: true, teamId: true }
             }),
             req.prisma.team.findMany({
@@ -85,7 +85,6 @@ router.get("/overview", async (req, res, next) => {
                     members: {
                         where: {
                             role: "SALES_MAN",
-                            isActive: true,
                             ...(user.role === "SALES_MAN" ? { id: user.id } : {})
                         },
                         select: { id: true, fullName: true, email: true, role: true, isActive: true }
