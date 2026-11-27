@@ -265,6 +265,7 @@ module.exports = {
     getActiveVisit,
     getVisitOptions,
     normalizeVisitInput,
+    parseCoordinate,
     startVisit,
     completeVisit
 };
