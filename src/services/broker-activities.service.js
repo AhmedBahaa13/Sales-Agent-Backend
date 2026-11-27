@@ -1,8 +1,5 @@
-const { getVisitAccess } = require("./visits.service");
-const { fetchOrientationRecords } = require("./dashboard.service");
-
 const clean = value => value == null ? null : String(value).trim() || null;
-const key = value => String(value || "").trim().toLocaleLowerCase();
+const normalize = value => String(value || "").normalize("NFKC").trim().replace(/\\s+/g, " ").toLocaleLowerCase();
 
 function httpError(status, message) {
     const error = new Error(message);
@@ -10,40 +7,13 @@ function httpError(status, message) {
     return error;
 }
 
-function isOrientationType(value) {
-    return key(value).includes("orientation");
-}
-
-function buildEligibleBrokers(legacyRecords = [], appRecords = []) {
-    const counts = new Map();
-    const add = name => {
-        const companyName = clean(name);
-        if (!companyName) return;
-        const normalized = key(companyName);
-        const current = counts.get(normalized);
-        if (current) current.orientationCount += 1;
-        else counts.set(normalized, { companyName, orientationCount: 1 });
-    };
-
-    legacyRecords
-        .filter(record => isOrientationType(record.type))
-        .forEach(record => add(record.companyName || record.newCompanyName));
-    appRecords
-        .filter(record => String(record.activityType).toUpperCase() === "ORIENTATION")
-        .forEach(record => add(record.companyName));
-
-    return [...counts.values()].sort((a, b) => a.companyName.localeCompare(b.companyName));
-}
-
 function normalizeActivityInput(input = {}) {
     const activityType = String(input.activityType || "").trim().toUpperCase();
-    const brokerType = String(input.brokerType || "").trim().toUpperCase() || null;
     const companyName = clean(input.companyName);
     const brokerAdmin = clean(input.brokerAdmin);
-    const requestNumber = clean(input.requestNumber);
 
     if (!["ORIENTATION", "WORKSHOP"].includes(activityType)) {
-        throw httpError(400, "Activity type must be Orientation or Workshop");
+        throw httpError(400, "Activity type must be ORIENTATION or WORKSHOP");
     }
     if (!companyName || companyName.length > 255) {
         throw httpError(400, "A valid company name is required");
@@ -51,78 +21,138 @@ function normalizeActivityInput(input = {}) {
     if (!brokerAdmin || brokerAdmin.length > 150) {
         throw httpError(400, "Broker Admin is required and must not exceed 150 characters");
     }
-    if (requestNumber && requestNumber.length > 100) {
-        throw httpError(400, "Request Number must not exceed 100 characters");
-    }
-    if (activityType === "ORIENTATION" && !["NEW_BROKER", "EXISTING_BROKER"].includes(brokerType)) {
-        throw httpError(400, "Broker type must be New Broker or Existing Broker");
-    }
-    if (activityType === "WORKSHOP" && brokerType !== null) {
-        throw httpError(400, "Workshop does not accept a broker type");
-    }
-
-    return { activityType, brokerType, companyName, brokerAdmin, requestNumber };
+    return { activityType, companyName, normalizedName: normalize(companyName), brokerAdmin };
 }
 
 async function getBrokerActivityOptions(prisma, userId) {
-    const access = await getVisitAccess(prisma, userId);
-    const [legacyResult, appRecords] = await Promise.all([
-        fetchOrientationRecords(access.user.email, false),
-        prisma.brokerActivity.findMany({
-            where: { userId: access.user.id, activityType: "ORIENTATION" },
-            select: { companyName: true, activityType: true }
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true, isActive: true }
+    });
+    if (!user || !user.isActive) throw httpError(401, "User account is unavailable");
+
+    const [orientedCompanies, completedOrientations] = await Promise.all([
+        prisma.orientation.findMany({
+            where: { salesId: userId, activityType: "ORIENTATION" },
+            distinct: ["companyId"],
+            select: { company: { select: { id: true, name: true } } },
+            orderBy: { createdAt: "desc" }
+        }),
+        prisma.orientation.findMany({
+            where: {
+                salesId: userId,
+                activityType: "ORIENTATION",
+                status: "COMPLETED"
+            },
+            distinct: ["companyId"],
+            select: { company: { select: { id: true, name: true } } },
+            orderBy: { createdAt: "desc" }
         })
     ]);
 
     return {
-        companies: access.companies.map(name => ({ name })),
-        eligibleBrokers: buildEligibleBrokers(legacyResult.records, appRecords),
-        legacyHistoryStatus: legacyResult.error ? "unavailable" : "connected",
-        legacyHistoryMessage: legacyResult.error || null
+        companies: orientedCompanies.map(item => ({ id: item.company.id, name: item.company.name })),
+        eligibleBrokers: completedOrientations.map(item => ({ id: item.company.id, companyName: item.company.name }))
     };
 }
 
 async function createBrokerActivity(prisma, userId, input) {
     const normalized = normalizeActivityInput(input);
-    const options = await getBrokerActivityOptions(prisma, userId);
-    const allowedCompanies = new Set(options.companies.map(item => key(item.name)));
 
-    if (normalized.activityType === "ORIENTATION" && normalized.brokerType === "EXISTING_BROKER" &&
-        !allowedCompanies.has(key(normalized.companyName))) {
-        throw httpError(403, "The selected company is not assigned to your account");
-    }
+    return prisma.$transaction(async tx => {
+        const user = await tx.user.findUnique({
+            where: { id: userId },
+            select: { id: true, role: true, isActive: true }
+        });
+        if (!user || !user.isActive) throw httpError(401, "User account is unavailable");
+        if (user.role !== "SALES_MAN") throw httpError(403, "Only Sales Men can create activities");
 
-    if (normalized.activityType === "WORKSHOP" &&
-        !options.eligibleBrokers.some(item => key(item.companyName) === key(normalized.companyName))) {
-        throw httpError(403, "Workshops can only be created for brokers with a previous Orientation");
-    }
+        let company;
+        if (normalized.activityType === "ORIENTATION") {
+            company = await tx.company.upsert({
+                where: { normalizedName: normalized.normalizedName },
+                update: {},
+                create: {
+                    name: normalized.companyName,
+                    normalizedName: normalized.normalizedName,
+                    createdById: userId
+                },
+                select: { id: true, name: true }
+            });
+        } else {
+            company = await tx.company.findUnique({
+                where: { normalizedName: normalized.normalizedName },
+                select: { id: true, name: true }
+            });
+            if (!company) throw httpError(404, "This company has no previous Orientation");
 
-    const activity = await prisma.brokerActivity.create({
-        data: {
-            userId,
-            activityType: normalized.activityType,
-            brokerType: normalized.brokerType,
-            companyName: normalized.companyName,
-            brokerAdmin: normalized.brokerAdmin,
-            requestNumber: normalized.requestNumber
-        },
-        select: {
-            id: true,
-            activityType: true,
-            brokerType: true,
-            companyName: true,
-            brokerAdmin: true,
-            requestNumber: true,
-            createdAt: true
+            const previousOrientation = await tx.orientation.findFirst({
+                where: {
+                    salesId: userId,
+                    companyId: company.id,
+                    activityType: "ORIENTATION",
+                    status: "COMPLETED"
+                },
+                select: { id: true }
+            });
+            if (!previousOrientation) {
+                throw httpError(403, "Workshop is available only after you complete an Orientation for this company");
+            }
         }
-    });
 
-    return activity;
+        return tx.orientation.create({
+            data: {
+                salesId: userId,
+                companyId: company.id,
+                activityType: normalized.activityType,
+                brokerAdmin: normalized.brokerAdmin,
+                status: "IN_PROGRESS"
+            },
+            select: {
+                id: true,
+                activityType: true,
+                brokerAdmin: true,
+                status: true,
+                startedAt: true,
+                endedAt: true,
+                createdAt: true,
+                company: { select: { id: true, name: true } },
+                sales: { select: { id: true, fullName: true, email: true } }
+            }
+        });
+    });
+}
+
+async function completeBrokerActivity(prisma, userId, activityId) {
+    return prisma.$transaction(async tx => {
+        const user = await tx.user.findUnique({
+            where: { id: userId },
+            select: { role: true, isActive: true }
+        });
+        if (!user || !user.isActive) throw httpError(401, "User account is unavailable");
+        if (user.role !== "SALES_MAN") throw httpError(403, "Only Sales Men can complete activities");
+
+        const activity = await tx.orientation.findUnique({
+            where: { id: activityId },
+            select: { id: true, salesId: true, status: true }
+        });
+        if (!activity) throw httpError(404, "Activity not found");
+        if (activity.salesId !== userId) throw httpError(403, "You can only complete your own activities");
+        if (activity.status !== "IN_PROGRESS") throw httpError(409, "Only in-progress activities can be completed");
+
+        const endedAt = new Date();
+        const result = await tx.orientation.updateMany({
+            where: { id: activityId, salesId: userId, status: "IN_PROGRESS" },
+            data: { status: "COMPLETED", endedAt }
+        });
+        if (result.count !== 1) throw httpError(409, "Activity has already been completed");
+        return { id: activityId, status: "COMPLETED", endedAt };
+    });
 }
 
 module.exports = {
-    buildEligibleBrokers,
     normalizeActivityInput,
     getBrokerActivityOptions,
-    createBrokerActivity
+    createBrokerActivity,
+    completeBrokerActivity
 };
