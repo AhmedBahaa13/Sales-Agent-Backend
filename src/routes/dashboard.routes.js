@@ -31,6 +31,18 @@ function groupByMonth(rows, dateSelector) {
         .map(([label, value]) => ({ label, value }));
 }
 
+function countBy(rows, selector) {
+    const values = new Map();
+    for (const row of rows) {
+        const label = selector(row);
+        if (!label) continue;
+        values.set(label, (values.get(label) || 0) + 1);
+    }
+    return [...values.entries()]
+        .map(([label, value]) => ({ label, value }))
+        .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+}
+
 function getSalesIdsForRole(user, users, teams) {
     if (user.role === "OPERATION_DIRECTOR") {
         return users.map(item => item.id);
@@ -199,7 +211,7 @@ router.get("/overview", async (req, res, next) => {
 
         const summary = {
             companies: allCompanies.length,
-            members: salesUsers.length,
+            members: effectiveSalesIds.length,
             teams: teams.length,
             visits: visits.length,
             visitsInPeriod: visits.length,
@@ -222,6 +234,30 @@ router.get("/overview", async (req, res, next) => {
             workshops: workshops.length,
             ads: ads.length
         };
+        const visibleTeamsById = new Map(teams.map(team => [team.id, team]));
+        const salesUsersById = new Map(salesUsers.map(sales => [sales.id, sales]));
+        const adRecords = ads.map(ad => ({
+            id: ad.id,
+            salesId: ad.salesId,
+            salesAgent: ad.sales.fullName,
+            link: ad.link,
+            createdAt: ad.createdAt
+        }));
+        const visitsByTeam = countBy(visits, visit => {
+            const sales = salesUsersById.get(visit.salesId);
+            return sales?.teamId
+                ? visibleTeamsById.get(sales.teamId)?.name
+                : "Unassigned";
+        });
+        const visitsByClient = countBy(visits, visit => visit.client.name);
+        const visitsByCreator = countBy(visits, visit => visit.sales.fullName);
+        const orientationByCompany = countBy(orientations, item => item.company.name);
+        const orientationByAgent = countBy(orientations, item => item.sales.fullName);
+        const orientationByManager = countBy(orientations, item => {
+            const sales = salesUsersById.get(item.salesId);
+            const team = sales?.teamId ? visibleTeamsById.get(sales.teamId) : null;
+            return team?.manager?.fullName;
+        });
 
         const managerHierarchy = user.role === "OPERATION_DIRECTOR" || user.role === "SALES_MANAGER"
             ? {
@@ -305,18 +341,18 @@ router.get("/overview", async (req, res, next) => {
                     { label: "IN_PROGRESS", value: inProgressVisits.length },
                     { label: "COMPLETED", value: completedVisits.length }
                 ],
-                visitsByCompany: [],
-                visitsByTeam: [],
-                visitsByCreator: [],
+                visitsByCompany: visitsByClient,
+                visitsByTeam,
+                visitsByCreator,
                 visitsByAssignee: [],
                 orientationByMonth: groupByMonth(orientations, item => item.startedAt),
                 orientationByType: [
                     { label: "ORIENTATION", value: orientationOnly.length },
                     { label: "WORKSHOP", value: workshops.length }
                 ],
-                orientationByCompany: [],
-                orientationByAgent: [],
-                orientationByManager: [],
+                orientationByCompany,
+                orientationByAgent,
+                orientationByManager,
                 personalVisitsTrend: groupByMonth(ownVisits, item => item.startedAt),
                 personalVisitsByStatus: [
                     { label: "IN_PROGRESS", value: ownVisits.filter(item => item.status === "IN_PROGRESS").length },
@@ -328,6 +364,8 @@ router.get("/overview", async (req, res, next) => {
             companyMembers: [],
             managerHierarchy,
             appActivities,
+            ads: adRecords,
+            recentAds: adRecords.slice(0, 20),
             orientationVisits: appActivities.map(item => ({
                 id: item.id,
                 recordType: "ORIENTATION",
