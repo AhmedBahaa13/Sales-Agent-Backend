@@ -69,7 +69,9 @@
   }
   function renderDashboard(data){
     const s=data.summary||{};
-    const isAdmin=data.user?.role==="ADMIN";
+    const isAdmin=data.user?.role==="OPERATION_DIRECTOR"||data.user?.role==="SALES_MANAGER";
+    const isSalesMan=data.user?.role==="SALES_MAN";
+    $("addActivityBtn").classList.toggle("hidden",!isSalesMan);
     const personal=data.personalSummary||{};
     const setPanelCopy=(id,title,subtitle)=>{const panel=$(id).closest(".panel");const heading=panel?.querySelector("h2");const description=panel?.querySelector("p");if(heading)heading.textContent=title;if(description)description.textContent=subtitle;};
     if(isAdmin){
@@ -111,14 +113,12 @@
       $("relationships").classList.add("hidden");
       $("dataHealthPanel").classList.add("hidden");
     }
-    $("relationshipsNav").classList.toggle("hidden",!isAdmin);
-    $("syncText").closest(".sync-status").classList.toggle("hidden",!isAdmin);
-    if(isAdmin){
-      $("sourceTeamChart").closest("article").classList.remove("hidden");
-      $("agentChart").closest("article").classList.remove("hidden");
-      $("relationships").classList.remove("hidden");
-      $("dataHealthPanel").classList.remove("hidden");
-    }
+    $("relationshipsNav").classList.add("hidden");
+    $("relationships").classList.add("hidden");
+    $("syncText").closest(".sync-status").classList.add("hidden");
+    $("dataHealthPanel").classList.add("hidden");
+    $("sourceTeamChart").closest("article").classList.add("hidden");
+    $("agentChart").closest("article").classList.add("hidden");
     renderHealth(data);
     const recentBase=isAdmin?(data.recentVisits||data.orientationVisits||[]):(data.personalRecentVisits||[]);
     const savedActivities=(data.appActivities||[]).map(activity=>({
