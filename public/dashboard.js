@@ -302,6 +302,10 @@
           [label("Notes","ملاحظات"),v.notes],
           [label("Sales Man","مندوب المبيعات"),v.createdBy||v.salesAgent]
         ] : []),
+        ...(v.recordType==="AD" ? [
+          [label("Ad link","رابط الإعلان"),v.link],
+          [label("Sales Man","مندوب المبيعات"),v.salesAgent]
+        ] : []),
         [label("Time in","وقت الدخول"),v.timeIn],
         [label("Time out","وقت الخروج"),v.timeOut],
         [label("Sales agent","مندوب المبيعات"),v.salesAgent||v.createdBy],
@@ -318,14 +322,16 @@
       ].filter(x=>x[1]!==null&&x[1]!==undefined&&String(x[1]).trim()!=="");
       const meta = v.recordType==="APP_VISIT"
         ? (v.clientName||label("Client visit","زيارة عميل"))
-        : ((v.timeIn||"—")+" · "+(v.salesAgent||v.createdBy||"—"));
+        : v.recordType==="AD"
+          ? (v.salesAgent||v.createdBy||"")
+          : ((v.timeIn||"—")+" · "+(v.salesAgent||v.createdBy||"—"));
       const isCurrent = v.recordType==="APP_VISIT" && v.status==="IN_PROGRESS";
-      const kind = v.recordType==="APP_VISIT" ? statusLabel(v.status) : (v.activityType||v.type||"Orientation");
+      const kind = v.recordType==="APP_VISIT" ? statusLabel(v.status) : v.recordType==="AD" ? t("ads") : (v.activityType||v.type||"Orientation");
       const completeAction = v.recordType==="ORIENTATION" && v.status==="IN_PROGRESS"
         ? '<button type="button" class="primary-btn" data-complete-activity="'+esc(v.id)+'">'+esc(label("Mark completed","إنهاء النشاط"))+'</button>'
         : "";
       const currentLabel = isCurrent ? '<small class="current-visit-label">'+esc(label("CURRENT VISIT","الزيارة الحالية"))+'</small>' : '';
-      return '<div class="recent-item orientation-record'+(isCurrent?' pending-current':'')+'"><div>'+currentLabel+'<strong>'+esc(v.clientName||v.companyName||t("unknown"))+'</strong><small>'+esc(v.date||date(v.scheduledAt||v.startedAt))+' · '+esc(meta)+'</small><div class="orientation-details">'+rows.map(x=>'<span><b>'+esc(x[0])+':</b> '+esc(x[1])+'</span>').join("")+'</div>'+completeAction+'</div><span class="status-pill '+(isCurrent?'pending':'')+'">'+esc(kind)+'</span></div>';
+      return '<div class="recent-item orientation-record'+(isCurrent?' pending-current':'')+'"><div>'+currentLabel+'<strong>'+esc(v.clientName||v.companyName||v.link||t("unknown"))+'</strong><small>'+esc(v.date||date(v.scheduledAt||v.startedAt))+' · '+esc(meta)+'</small><div class="orientation-details">'+rows.map(x=>'<span><b>'+esc(x[0])+':</b> '+esc(x[1])+'</span>').join("")+'</div>'+completeAction+'</div><span class="status-pill '+(isCurrent?'pending':'')+'">'+esc(kind)+'</span></div>';
     }).join("");
   }
 
