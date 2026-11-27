@@ -127,7 +127,7 @@ test("direct visit creates a client source and links visit to client and sales m
 
     assert.equal(calls.clientCreate.createdById, "sales-1");
     assert.equal(calls.sourceCreate.createdById, "sales-1");
-    assert.equal(calls.sourceCreate.sourceType, "Referral");
+    assert.equal(calls.sourceCreate.sourceType, "REFERRAL");
     assert.equal(calls.visitCreate.salesId, "sales-1");
     assert.equal(calls.visitCreate.clientId, "client-1");
     assert.equal(calls.visitCreate.clientSourceId, "source-1");
