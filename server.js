@@ -2,10 +2,8 @@
 require("dotenv").config();
 const path = require("path");
 const express = require("express");
-const myDataRoutes = require("./src/routes/my-data.routes");
 const authRoutes = require("./src/routes/auth.routes");
 const companyRoutes = require("./src/routes/company.routes");
-const sheetsSyncRoutes = require("./src/routes/sheets-sync.routes");
 const dashboardRoutes = require("./src/routes/dashboard.routes");
 const visitRoutes = require("./src/routes/visits.routes");
 const brokerActivityRoutes = require("./src/routes/broker-activities.routes");
@@ -96,9 +94,7 @@ app.use(express.static(path.join(__dirname, "public")));
     });
 
     app.use("/api/auth", authRoutes);
-    app.use("/api/my-data", myDataRoutes);
     app.use("/api/companies", companyRoutes);
-    app.use("/api/sync", sheetsSyncRoutes);
     app.use("/api/dashboard", dashboardRoutes);
     app.use("/api/visits", visitRoutes);
     app.use("/api/activities", brokerActivityRoutes);
