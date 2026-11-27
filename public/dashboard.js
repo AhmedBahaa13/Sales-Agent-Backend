@@ -229,16 +229,18 @@
         ...(v.recordType==="APP_VISIT" ? [
           [label("Client","العميل"),v.clientName],
           [label("Client phone","هاتف العميل"),v.clientPhone],
-          [label("Property","العقار"),v.propertyName],
-          [label("Address","العنوان"),v.propertyAddress],
-          [label("Team","الفريق"),v.teamName],
+          [label("Client source","مصدر العميل"),v.source],
+          [label("Source type","نوع المصدر"),v.clientSourceType],
+          [label("Source name","اسم المصدر"),v.clientSourceName],
+          [label("Source phone","هاتف المصدر"),v.clientSourcePhone],
+          [label("Source details","تفاصيل المصدر"),v.clientSourceDetails],
           [label("Status","الحالة"),statusLabel(v.status)],
           [label("Started at","وقت البداية"),v.startedAt?date(v.startedAt):""],
           [label("Ended at","وقت النهاية"),v.endedAt?date(v.endedAt):""],
           [label("Start GPS","موقع البداية"),v.startLatitude!=null&&v.startLongitude!=null?(v.startLatitude+", "+v.startLongitude):""],
           [label("End GPS","موقع النهاية"),v.endLatitude!=null&&v.endLongitude!=null?(v.endLatitude+", "+v.endLongitude):""],
           [label("Notes","ملاحظات"),v.notes],
-          [label("Created by","أنشأها"),v.createdBy]
+          [label("Sales Man","مندوب المبيعات"),v.createdBy||v.salesAgent]
         ] : []),
         [label("Time in","وقت الدخول"),v.timeIn],
         [label("Time out","وقت الخروج"),v.timeOut],
@@ -255,12 +257,15 @@
         [label("Duplicate","مكرر؟"),v.isDuplicate]
       ].filter(x=>x[1]!==null&&x[1]!==undefined&&String(x[1]).trim()!=="");
       const meta = v.recordType==="APP_VISIT"
-        ? (v.propertyName||v.clientName||label("Property visit","زيارة عقارية"))
+        ? (v.clientName||label("Client visit","زيارة عميل"))
         : ((v.timeIn||"—")+" · "+(v.salesAgent||v.createdBy||"—"));
       const isCurrent = v.recordType==="APP_VISIT" && v.status==="IN_PROGRESS";
-      const kind = v.recordType==="APP_VISIT" ? statusLabel(v.status) : (v.type||"Orientation");
+      const kind = v.recordType==="APP_VISIT" ? statusLabel(v.status) : (v.activityType||v.type||"Orientation");
+      const completeAction = v.recordType==="ORIENTATION" && v.status==="IN_PROGRESS"
+        ? '<button type="button" class="primary-btn" data-complete-activity="'+esc(v.id)+'">'+esc(label("Mark completed","إنهاء النشاط"))+'</button>'
+        : "";
       const currentLabel = isCurrent ? '<small class="current-visit-label">'+esc(label("CURRENT VISIT","الزيارة الحالية"))+'</small>' : '';
-      return '<div class="recent-item orientation-record'+(isCurrent?' pending-current':'')+'"><div>'+currentLabel+'<strong>'+esc(v.companyName||v.newCompanyName||t("unknown"))+'</strong><small>'+esc(v.date||date(v.scheduledAt))+' · '+esc(meta)+'</small><div class="orientation-details">'+rows.map(x=>'<span><b>'+esc(x[0])+':</b> '+esc(x[1])+'</span>').join("")+'</div></div><span class="status-pill '+(isCurrent?'pending':'')+'">'+esc(kind)+'</span></div>';
+      return '<div class="recent-item orientation-record'+(isCurrent?' pending-current':'')+'"><div>'+currentLabel+'<strong>'+esc(v.clientName||v.companyName||t("unknown"))+'</strong><small>'+esc(v.date||date(v.scheduledAt||v.startedAt))+' · '+esc(meta)+'</small><div class="orientation-details">'+rows.map(x=>'<span><b>'+esc(x[0])+':</b> '+esc(x[1])+'</span>').join("")+'</div>'+completeAction+'</div><span class="status-pill '+(isCurrent?'pending':'')+'">'+esc(kind)+'</span></div>';
     }).join("");
   }
 
