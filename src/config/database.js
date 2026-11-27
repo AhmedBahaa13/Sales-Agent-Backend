@@ -36,7 +36,7 @@ function getDatabaseConnectionOptions(env = process.env) {
         throw new Error("DATABASE_URL must use the mysql:// or mariadb:// protocol");
     }
 
-    const database = decodeURIComponent(url.pathname.replace(/^\\/+/, ""));
+    const database = decodeURIComponent(url.pathname.slice(1));
     const user = decodeURIComponent(url.username);
     const password = decodeURIComponent(url.password);
 
