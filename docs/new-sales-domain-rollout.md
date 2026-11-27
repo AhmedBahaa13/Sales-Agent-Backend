@@ -39,6 +39,16 @@ WHERE `email` = 'director@example.com';
 
 The Operation Director can then provision Sales Manager and Sales Man accounts through `POST /api/users`. Public registration remains disabled unless `ALLOW_PUBLIC_REGISTRATION=true`; when enabled, it can only create a Sales Man account.
 
+If existing accounts should remain Sales Managers after rollout, promote them before assigning Teams. For example:
+
+```sql
+UPDATE `User`
+SET `role` = 'SALES_MANAGER'
+WHERE `email` IN ('manager1@example.com', 'manager2@example.com');
+```
+
+All other existing accounts remain `SALES_MAN` unless their role is explicitly changed. Existing access tokens from the old JWT format do not include a session ID and will require a fresh login.
+
 ## Team management endpoints
 
 - `GET /api/teams`: list teams visible to the current role.
