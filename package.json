@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "build": "npx prisma generate --config prisma7.config.ts && node -e \"require('node:fs').rmSync('dist/generated/prisma',{recursive:true,force:true})\" && npx tsc -p tsconfig.json && node -e \"require('node:fs').copyFileSync('generated/prisma/package.json','dist/generated/prisma/package.json')\"",
+    "build": "npx prisma generate --config prisma7.config.ts && node -e \"require('node:fs').writeFileSync('generated/prisma/package.json', JSON.stringify({type:'module'}))\" && node -e \"require('node:fs').rmSync('dist/generated/prisma',{recursive:true,force:true})\" && npx tsc -p tsconfig.json && node -e \"require('node:fs').mkdirSync('dist/generated/prisma',{recursive:true}); require('node:fs').copyFileSync('generated/prisma/package.json','dist/generated/prisma/package.json')\" && node -e \"import('./dist/generated/prisma/client.js').then(m=>{if(!m.PrismaClient) throw new Error('PrismaClient ESM export missing'); console.log('Prisma ESM import verified')})\"",
     "start": "node server.js",
     "dev": "node --watch server.js",
     "prestart": "npm run build && node scripts/migrate.js",
