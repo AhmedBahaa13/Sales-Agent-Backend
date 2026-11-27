@@ -242,3 +242,15 @@ test("another Sales Man cannot complete someone else's visit", async () => {
         error => error.status === 403
     );
 });
+
+test("direct visit accepts only the supported source types", () => {
+    for (const sourceType of ["CRM", "REFERRAL", "PERSONAL", "FREELANCER", "referral"]) {
+        const normalized = normalizeVisitInput(baseVisitInput({
+            sourceDetails: { sourceType, name: "Source contact" }
+        }));
+        assert.equal(normalized.sourceDetails.sourceType, sourceType.toUpperCase());
+    }
+    assert.throws(() => normalizeVisitInput(baseVisitInput({
+        sourceDetails: { sourceType: "UNKNOWN", name: "Source contact" }
+    })), error => error.status === 400);
+});
