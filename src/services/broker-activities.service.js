@@ -199,7 +199,7 @@ async function completeBrokerActivity(prisma, userId, activityId, input = {}) {
 
         const activity = await tx.orientation.findUnique({
             where: { id: activityId },
-            select: { id: true, salesId: true, status: true, startedAt: true }
+            select: { id: true, salesId: true, status: true, startedAt: true, activityType: true, brokerAdmin: true }
         });
         if (!activity) throw httpError(404, "Activity not found");
         if (activity.salesId !== userId) throw httpError(403, "You can only complete your own activities");
@@ -214,6 +214,8 @@ async function completeBrokerActivity(prisma, userId, activityId, input = {}) {
         return {
             id: activityId,
             status: "COMPLETED",
+            activityType: activity.activityType,
+            brokerAdmin: activity.brokerAdmin,
             startedAt: activity.startedAt,
             endedAt,
             endLatitude,
