@@ -32,7 +32,7 @@ async function executeMigrationStatement(connection, statement) {
     if (!normalized) return;
 
     const addColumn = normalized.match(
-        /^ALTER\\s+TABLE\\s+`?([A-Za-z0-9_]+)`?\\s+ADD\\s+COLUMN\\s+`?([A-Za-z0-9_]+)`?\\s+([\\s\\S]+)$/i
+        /^ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s+ADD\s+COLUMN\s+`?([A-Za-z0-9_]+)`?\s+([\s\S]+)$/i
     );
     if (addColumn) {
         const [, tableName, columnName] = addColumn;
@@ -47,7 +47,7 @@ async function executeMigrationStatement(connection, statement) {
     }
 
     const addConstraint = normalized.match(
-        /^ALTER\\s+TABLE\\s+`?([A-Za-z0-9_]+)`?\\s+ADD\\s+CONSTRAINT\\s+`?([A-Za-z0-9_]+)`?/i
+        /^ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s+ADD\s+CONSTRAINT\s+`?([A-Za-z0-9_]+)`?/i
     );
     if (addConstraint) {
         const [, tableName, constraintName] = addConstraint;
@@ -62,7 +62,7 @@ async function executeMigrationStatement(connection, statement) {
     }
 
     const createIndex = normalized.match(
-        /^CREATE\\s+(?:UNIQUE\\s+)?INDEX\\s+`?([A-Za-z0-9_]+)`?\\s+ON\\s+`?([A-Za-z0-9_]+)`?/i
+        /^CREATE\s+(?:UNIQUE\s+)?INDEX\s+`?([A-Za-z0-9_]+)`?\s+ON\s+`?([A-Za-z0-9_]+)`?/i
     );
     if (createIndex) {
         const [, indexName, tableName] = createIndex;
@@ -109,7 +109,7 @@ async function run() {
 
             const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
             const statements = sql
-                .replace(/^\\s*--.*$/gm, "")
+                .replace(/^\s*--.*$/gm, "")
                 .split(";")
                 .map(statement => statement.trim())
                 .filter(Boolean);
