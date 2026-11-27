@@ -14,9 +14,8 @@ function getConnectionOptions() {
     };
 }
 
-
 async function assertDestructiveMigrationCanStart(connection, file, sql) {
-    if (!/\\bDROP\\s+TABLE\\b/i.test(sql)) return;
+    if (!/\bDROP\s+TABLE\b/i.test(sql)) return;
 
     const partialRolloutColumns = await connection.query(
         "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS " +
@@ -25,7 +24,10 @@ async function assertDestructiveMigrationCanStart(connection, file, sql) {
     );
 
     if (partialRolloutColumns.length > 0) {
-        const names = partialRolloutColumns.map(row => row.COLUMN_NAME || row.column_name).filter(Boolean);
+        const names = partialRolloutColumns
+            .map(row => row.COLUMN_NAME || row.column_name)
+            .filter(Boolean);
+
         throw new Error(
             "Refusing to rerun destructive migration " + file +
             " because the User table already has rollout columns (" +
@@ -98,7 +100,9 @@ async function run() {
             [migrationLockName]
         );
         migrationLockAcquired = Number(lockResult[0]?.acquired) === 1;
-        if (!migrationLockAcquired) throw new Error("Could not acquire the database migration lock");
+        if (!migrationLockAcquired) {
+            throw new Error("Could not acquire the database migration lock");
+        }
 
         await connection.query(
             "CREATE TABLE IF NOT EXISTS `brokerflow_migrations` (" +
@@ -117,7 +121,10 @@ async function run() {
             ") ENGINE=InnoDB"
         );
 
-        const files = fs.readdirSync(MIGRATIONS_DIR).filter(file => file.endsWith(".sql")).sort();
+        const files = fs.readdirSync(MIGRATIONS_DIR)
+            .filter(file => file.endsWith(".sql"))
+            .sort();
+
         for (const file of files) {
             const alreadyApplied = await connection.query(
                 "SELECT `id` FROM `brokerflow_migrations` WHERE `id` = ? LIMIT 1",
@@ -147,7 +154,7 @@ async function run() {
 
             try {
                 const statements = sql
-                    .replace(/^\\s*--.*$/gm, "")
+                    .replace(/^\s*--.*$/gm, "")
                     .split(";")
                     .map(statement => statement.trim())
                     .filter(Boolean);
@@ -192,4 +199,9 @@ if (require.main === module) {
     });
 }
 
-module.exports = { assertDestructiveMigrationCanStart, executeMigrationStatement, getConnectionOptions, run };
+module.exports = {
+    assertDestructiveMigrationCanStart,
+    executeMigrationStatement,
+    getConnectionOptions,
+    run
+};
