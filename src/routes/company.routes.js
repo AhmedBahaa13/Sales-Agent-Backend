@@ -1,449 +1,54 @@
-
 const express = require("express");
-const {
-    authenticateToken
-} = require("../middleware/auth.middleware");
+const { authenticateToken } = require("../middleware/auth.middleware");
 
-const { canManageCompanyMembers } = require("../utils/access-policy");
 const router = express.Router();
-
 router.use(authenticateToken);
 
-// Check whether the current user belongs to the company
-async function getMembership(prisma, companyId, userId) {
-    return prisma.companyMember.findUnique({
-        where: {
-            companyId_userId: {
-                companyId,
-                userId
-            }
-        }
-    });
+async function getVisibleSalesIds(prisma, user) {
+    if (user.role === "OPERATION_DIRECTOR") {
+        const users = await prisma.user.findMany({
+            where: { role: "SALES_MAN", isActive: true },
+            select: { id: true }
+        });
+        return users.map(item => item.id);
+    }
+    if (user.role === "SALES_MANAGER") {
+        const teams = await prisma.team.findMany({
+            where: { managerId: user.id, isActive: true },
+            select: { members: { where: { role: "SALES_MAN", isActive: true }, select: { id: true } } }
+        });
+        return teams.flatMap(team => team.members.map(member => member.id));
+    }
+    return [user.id];
 }
 
-// POST /api/companies
-// Create a company. The creator automatically becomes OWNER.
-router.post("/", async (req, res, next) => {
-    try {
-        const { name } = req.body || {};
-
-        if (typeof name !== "string" || !name.trim()) {
-            return res.status(400).json({
-                message: "Company name is required"
-            });
-        }
-
-        const normalizedName = name.trim();
-
-        if (normalizedName.length > 150) {
-            return res.status(400).json({
-                message: "Company name must not exceed 150 characters"
-            });
-        }
-
-        const company = await req.prisma.$transaction(async (tx) => {
-            const createdCompany = await tx.company.create({
-                data: {
-                    name: normalizedName
-                }
-            });
-
-            await tx.companyMember.create({
-                data: {
-                    companyId: createdCompany.id,
-                    userId: req.userId,
-                    role: "OWNER"
-                }
-            });
-
-            return createdCompany;
-        });
-
-        return res.status(201).json({
-            message: "Company created successfully",
-            company: {
-                id: company.id,
-                name: company.name,
-                isActive: company.isActive,
-                createdAt: company.createdAt,
-                role: "OWNER"
-            }
-        });
-
-    } catch (error) {
-        next(error);
-    }
-});
-
-// GET /api/companies
-// Get all companies that the current user belongs to.
 router.get("/", async (req, res, next) => {
     try {
-        const memberships = await req.prisma.companyMember.findMany({
-            where: {
-                userId: req.userId,
-                company: {
-                    isActive: true
-                }
-            },
-            include: {
-                company: {
-                    include: {
-                        _count: {
-                            select: {
-                                members: true,
-                                teams: true
-                            }
-                        }
-                    }
-                }
-            },
-            orderBy: {
-                createdAt: "desc"
-            }
-        });
-
-        const companies = memberships.map((membership) => ({
-            id: membership.company.id,
-            name: membership.company.name,
-            isActive: membership.company.isActive,
-            createdAt: membership.company.createdAt,
-            role: membership.role,
-            membersCount: membership.company._count.members,
-            teamsCount: membership.company._count.teams
-        }));
-
-        return res.json({
-            count: companies.length,
-            companies
-        });
-
+        const user = req.currentUser;
+        const salesIds = await getVisibleSalesIds(req.prisma, user);
+        const companies = user.role === "OPERATION_DIRECTOR"
+            ? await req.prisma.company.findMany({ orderBy: { name: "asc" } })
+            : salesIds.length
+                ? await req.prisma.company.findMany({
+                    where: { orientations: { some: { salesId: { in: salesIds } } } },
+                    orderBy: { name: "asc" }
+                })
+                : [];
+        return res.json({ count: companies.length, companies });
     } catch (error) {
-        next(error);
+        return next(error);
     }
 });
 
+// Legacy dropdown routes now read the application Company table only.
+// The preserved company_dropdown import table is intentionally not used by application flows.
+router.get("/all", (req, res) => res.redirect(307, "/api/companies"));
+router.get("/dropdown", (req, res) => res.redirect(307, "/api/companies"));
 
-// GET /api/companies/dropdown
-// Return all unique companies imported from Google Sheets.
-router.get("/all", async (req, res, next) => {
-    try {
-        const records = await req.prisma.companyDropdown.findMany({
-            select: {
-                id: true,
-                dropdownId: true,
-                companyName: true,
-                salesAgent: true
-            },
-            orderBy: {
-                companyName: "asc"
-            }
-        });
-
-        // Remove duplicate company names while preserving their sales agents.
-        const companiesMap = new Map();
-
-        for (const record of records) {
-            const companyName = record.companyName.trim();
-
-            if (!companyName) continue;
-
-            const key = companyName.toLowerCase();
-
-            if (!companiesMap.has(key)) {
-                companiesMap.set(key, {
-                    id: record.id,
-                    dropdownId: record.dropdownId,
-                    companyName,
-                    salesAgents: []
-                });
-            }
-
-            const company = companiesMap.get(key);
-
-            if (
-                record.salesAgent &&
-                !company.salesAgents.includes(record.salesAgent.trim())
-            ) {
-                company.salesAgents.push(record.salesAgent.trim());
-            }
-        }
-
-        const companies = [...companiesMap.values()];
-
-        return res.json({
-            success: true,
-            source: "GOOGLE_SHEETS_DROPDOWN",
-            count: companies.length,
-            companies
-        });
-
-    } catch (error) {
-        next(error);
-    }
+router.post("/", (req, res) => {
+    return res.status(405).json({
+        message: "Companies are created automatically when a Sales Man records an Orientation"
+    });
 });
-
-
-
-router.get("/dropdown", async (req, res, next) => {
-    try {
-        const user = await req.prisma.user.findUnique({
-            where: { id: req.userId },
-            select: { id: true, email: true }
-        });
-        if (!user) return res.status(401).json({ message: "User not found" });
-
-        const userEmail = user.email.trim().toLowerCase();
-        const [emailRecords, memberships] = await Promise.all([
-            req.prisma.companyDropdown.findMany({
-                where: { email: userEmail },
-                orderBy: { companyName: "asc" }
-            }),
-            req.prisma.companyMember.findMany({
-                where: { userId: user.id, company: { isActive: true } },
-                select: { company: { select: { id: true, name: true } } }
-            })
-        ]);
-
-        const companies = new Map();
-        for (const record of emailRecords) {
-            const key = record.companyName.trim().toLocaleLowerCase();
-            companies.set(key, {
-                id: record.id,
-                dropdownId: record.dropdownId,
-                companyName: record.companyName,
-                salesAgent: record.salesAgent,
-                email: record.email,
-                accessType: "DIRECT",
-                warnings: []
-            });
-        }
-        for (const membership of memberships) {
-            const company = membership.company;
-            const key = company.name.trim().toLocaleLowerCase();
-            if (!companies.has(key)) {
-                companies.set(key, {
-                    id: company.id,
-                    dropdownId: null,
-                    companyName: company.name,
-                    salesAgent: null,
-                    email: userEmail,
-                    accessType: "MEMBERSHIP",
-                    warnings: []
-                });
-            }
-        }
-
-        return res.json({
-            userEmail,
-            count: companies.size,
-            companies: [...companies.values()],
-            warnings: []
-        });
-    } catch (error) {
-        next(error);
-    }
-});
-
-
-// GET /api/companies/:companyId
-// Get company details.
-router.get("/:companyId", async (req, res, next) => {
-    try {
-        const { companyId } = req.params;
-
-        const membership = await getMembership(
-            req.prisma,
-            companyId,
-            req.userId
-        );
-
-        if (!membership) {
-            return res.status(403).json({
-                message: "You are not a member of this company"
-            });
-        }
-
-        const company = await req.prisma.company.findUnique({
-            where: {
-                id: companyId
-            },
-            include: {
-                _count: {
-                    select: {
-                        members: true,
-                        teams: true,
-                        visits: true
-                    }
-                }
-            }
-        });
-
-        if (!company) {
-            return res.status(404).json({
-                message: "Company not found"
-            });
-        }
-
-        if (!company.isActive) {
-            return res.status(403).json({
-                message: "This company is inactive"
-            });
-        }
-
-        return res.json({
-            company: {
-                id: company.id,
-                name: company.name,
-                isActive: company.isActive,
-                createdAt: company.createdAt,
-                updatedAt: company.updatedAt,
-                role: membership.role,
-                membersCount: company._count.members,
-                teamsCount: company._count.teams,
-                visitsCount: company._count.visits
-            }
-        });
-
-    } catch (error) {
-        next(error);
-    }
-});
-
-// PATCH /api/companies/:companyId
-// OWNER and ADMIN can update the company name.
-router.patch("/:companyId", async (req, res, next) => {
-    try {
-        const { companyId } = req.params;
-        const { name } = req.body || {};
-
-        if (typeof name !== "string" || !name.trim()) {
-            return res.status(400).json({
-                message: "Company name is required"
-            });
-        }
-
-        const normalizedName = name.trim();
-
-        if (normalizedName.length > 150) {
-            return res.status(400).json({
-                message: "Company name must not exceed 150 characters"
-            });
-        }
-
-        const membership = await getMembership(
-            req.prisma,
-            companyId,
-            req.userId
-        );
-
-        if (!membership) {
-            return res.status(403).json({
-                message: "You are not a member of this company"
-            });
-        }
-
-        if (!["OWNER", "ADMIN"].includes(membership.role)) {
-            return res.status(403).json({
-                message: "You do not have permission to update this company"
-            });
-        }
-
-        const company = await req.prisma.company.update({
-            where: {
-                id: companyId
-            },
-            data: {
-                name: normalizedName
-            },
-            select: {
-                id: true,
-                name: true,
-                isActive: true,
-                updatedAt: true
-            }
-        });
-
-        return res.json({
-            message: "Company updated successfully",
-            company
-        });
-
-    } catch (error) {
-        if (error.code === "P2025") {
-            return res.status(404).json({
-                message: "Company not found"
-            });
-        }
-
-        next(error);
-    }
-});
-
-// GET /api/companies/:companyId/members
-// Get all members of a company.
-router.get("/:companyId/members", async (req, res, next) => {
-    try {
-        const { companyId } = req.params;
-
-        const membership = await getMembership(
-            req.prisma,
-            companyId,
-            req.userId
-        );
-
-        if (!membership) {
-            return res.status(403).json({
-                message: "You are not a member of this company"
-            });
-        }
-
-        const memberWhere = {
-            companyId,
-            ...(canManageCompanyMembers(membership.role) ? {} : { userId: req.userId })
-        };
-        const members = await req.prisma.companyMember.findMany({
-            where: memberWhere,
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        fullName: true,
-                        email: true,
-                        phone: true,
-                        isActive: true,
-                        createdAt: true
-                    }
-                }
-            },
-            orderBy: {
-                createdAt: "asc"
-            }
-        });
-
-        const result = members.map((member) => ({
-            userId: member.user.id,
-            fullName: member.user.fullName,
-            email: member.user.email,
-            phone: member.user.phone,
-            isActive: member.user.isActive,
-            role: member.role,
-            joinedAt: member.createdAt
-        }));
-
-        return res.json({
-            count: result.length,
-            members: result
-        });
-
-    } catch (error) {
-        next(error);
-    }
-});
-
-
-// GET /api/companies/dropdown
-// Get Google Sheets companies assigned to the authenticated user.
-
 
 module.exports = router;
