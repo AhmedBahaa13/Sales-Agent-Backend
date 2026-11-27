@@ -355,6 +355,20 @@
     $("relationshipRows").innerHTML=rows.length?rows.slice(0,250).map(x=>'<tr><td>'+esc(x.from)+'</td><td>'+esc(x.to)+'</td><td>'+num(x.count)+'</td></tr>').join(""):'<tr><td colspan="3">'+esc(t("noRelationships"))+'</td></tr>';
   }
   function statusLabel(v){return ({SCHEDULED:t("scheduled"),IN_PROGRESS:t("inProgress"),COMPLETED:t("completedStatus"),CANCELLED:t("cancelledStatus"),NO_SHOW:t("noShow")})[v]||v||t("unknown");}
+  $("recentVisits").addEventListener("click",async event=>{
+    const button=event.target.closest("[data-complete-activity]");
+    if(!button)return;
+    const id=button.dataset.completeActivity;
+    button.disabled=true;
+    try{
+      await api("/api/activities/"+encodeURIComponent(id)+"/complete",{method:"PATCH"});
+      toast(state.language==="ar"?"تم إنهاء النشاط":"Activity completed");
+      await loadDashboard();
+    }catch(error){
+      button.disabled=false;
+      toast(error.message||t("networkError"));
+    }
+  });
   $("addActivityBtn").addEventListener("click",openActivityDialog);
   $("closeActivityBtn").addEventListener("click",closeActivityDialog);
   $("cancelActivityBtn").addEventListener("click",closeActivityDialog);
