@@ -190,6 +190,13 @@ router.get("/overview", async (req, res, next) => {
             email: item.sales.email
         }));
 
+        const adRecords = ads.map(ad => ({
+            id: ad.id,
+            salesId: ad.salesId,
+            salesAgent: ad.sales.fullName,
+            link: ad.link,
+            createdAt: ad.createdAt
+        }));
         const adActivityRows = adRecords.map(item => ({
             ...item,
             recordType: "AD",
@@ -244,13 +251,7 @@ router.get("/overview", async (req, res, next) => {
         };
         const visibleTeamsById = new Map(teams.map(team => [team.id, team]));
         const salesUsersById = new Map(salesUsers.map(sales => [sales.id, sales]));
-        const adRecords = ads.map(ad => ({
-            id: ad.id,
-            salesId: ad.salesId,
-            salesAgent: ad.sales.fullName,
-            link: ad.link,
-            createdAt: ad.createdAt
-        }));
+
         const visitsByTeam = countBy(visits, visit => {
             const sales = salesUsersById.get(visit.salesId);
             return sales?.teamId
