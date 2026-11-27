@@ -80,8 +80,11 @@ function transactionPrisma(txOverrides = {}) {
                 phone: "01111111111", details: "Introduced"
             })
         },
-        ...txOverrides
     };
+    if (txOverrides.visit) tx.visit = { ...tx.visit, ...txOverrides.visit };
+    if (txOverrides.client) tx.client = { ...tx.client, ...txOverrides.client };
+    if (txOverrides.clientSource) tx.clientSource = { ...tx.clientSource, ...txOverrides.clientSource };
+    if (txOverrides.$queryRawUnsafe) tx.$queryRawUnsafe = txOverrides.$queryRawUnsafe;
     return {
         calls,
         prisma: {
