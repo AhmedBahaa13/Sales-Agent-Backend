@@ -47,6 +47,7 @@
         <div><p class="eyebrow" data-i18n="workspaceOverview">WORKSPACE OVERVIEW</p><h1 data-i18n="dashboard">Dashboard</h1></div>
         <div class="top-actions">
           <span class="sync-status"><i></i><span id="syncText">—</span></span>
+          <button id="addActivityBtn" class="primary-btn activity-open-btn" type="button" data-i18n="addActivity">Add activity</button>
           <button id="languageBtn" class="icon-btn" aria-label="Change language">عربي</button>
           <button id="refreshBtn" class="icon-btn" aria-label="Refresh">↻</button>
         </div>
@@ -55,7 +56,6 @@
       <section class="toolbar" id="overview">
         <div><span class="muted" data-i18n="analyticsFor">Analytics for</span><strong id="periodLabel">Last 30 days</strong></div>
         <div class="filters">
-          <select id="companyFilter" aria-label="Company filter"><option value="" data-i18n="allCompanies">All companies</option></select>
           <select id="periodFilter" aria-label="Period filter">
             <option value="7d" data-i18n="last7">Last 7 days</option>
             <option value="30d" data-i18n="last30">Last 30 days</option>
@@ -67,7 +67,7 @@
       </section>
 
       <section id="kpiGrid" class="kpi-grid">
-        <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+        <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton kpi-wide"></div>
       </section>
 
       <section id="adminVisitsSection" class="panel admin-visits-panel hidden">
@@ -85,7 +85,11 @@
 
       <section class="content-grid">
         <article class="panel span-2">
-          <div class="panel-head"><div><h2 data-i18n="visitTrend">Visit activity</h2><p data-i18n="visitTrendSub">Monthly visit volume in the selected period</p></div><span class="panel-icon">↗</span></div>
+          <div class="panel-head"><div><h2 data-i18n="activityBreakdown">Activity breakdown</h2><p data-i18n="activityBreakdownSub">Meetings, visits, orientations, workshops and ads in the selected period</p></div><span class="panel-icon">▥</span></div>
+          <div id="activityBreakdown" class="bar-list"></div>
+        </article>
+        <article class="panel span-2">
+          <div class="panel-head"><div><h2 data-i18n="visitTrend">Activity trend</h2><p data-i18n="visitTrendSub">Monthly visit volume in the selected period</p></div><span class="panel-icon">↗</span></div>
           <div id="visitTrend" class="chart-area"></div>
         </article>
         <article class="panel">
@@ -132,6 +136,52 @@
       <footer>BrokerFlow · <span data-i18n="footer">Sales intelligence workspace</span></footer>
     </main>
   </div>
+  <dialog id="activityDialog" class="activity-dialog" aria-labelledby="activityDialogTitle">
+    <form id="activityForm" class="activity-form">
+      <div class="activity-dialog-head">
+        <div>
+          <p class="eyebrow" data-i18n="createRecord">CREATE RECORD</p>
+          <h2 id="activityDialogTitle" data-i18n="addActivity">Add activity</h2>
+        </div>
+        <button id="closeActivityBtn" class="icon-btn" type="button" aria-label="Close">×</button>
+      </div>
+      <label for="activityType" data-i18n="activityType">Activity type</label>
+      <select id="activityType" required>
+        <option value="ORIENTATION" data-i18n="orientation">Orientation</option>
+        <option value="WORKSHOP" data-i18n="workshop">Workshop</option>
+      </select>
+
+      <div id="newCompanyGroup">
+        <label for="newCompanyName" data-i18n="companyName">Company name</label>
+        <input id="newCompanyName" type="text" maxlength="255" required autocomplete="organization">
+      </div>
+
+      <div id="existingCompanyGroup" class="hidden">
+        <label for="companySearch" data-i18n="searchCompanies">Search assigned companies</label>
+        <input id="companySearch" type="search" placeholder="Search company name" data-i18n-placeholder="searchCompanyPlaceholder">
+        <label for="existingCompany" data-i18n="assignedCompany">Assigned company</label>
+        <select id="existingCompany" size="4"></select>
+      </div>
+
+      <div id="eligibleBrokerGroup" class="hidden">
+        <p class="form-hint" data-i18n="eligibleBrokerHint">Only brokers with at least one previous Orientation are shown.</p>
+        <label for="eligibleSearch" data-i18n="searchEligible">Search eligible brokers</label>
+        <input id="eligibleSearch" type="search" placeholder="Search broker name" data-i18n-placeholder="searchEligiblePlaceholder">
+        <label for="eligibleBroker" data-i18n="eligibleBroker">Eligible broker</label>
+        <select id="eligibleBroker" size="4"></select>
+        <p id="eligibleEmpty" class="form-hint hidden" data-i18n="noEligibleBrokers">No eligible brokers yet. Record an Orientation first.</p>
+      </div>
+
+      <label for="brokerAdmin" data-i18n="brokerAdmin">Broker Admin</label>
+      <input id="brokerAdmin" type="text" maxlength="150" required>
+
+      <p id="activityFormError" class="error-text" role="alert"></p>
+      <div class="activity-form-actions">
+        <button id="cancelActivityBtn" class="icon-btn" type="button" data-i18n="cancel">Cancel</button>
+        <button id="saveActivityBtn" class="primary-btn" type="submit" data-i18n="saveActivity">Save activity</button>
+      </div>
+    </form>
+  </dialog>
   <div id="toast" class="toast" role="status"></div>
   <script src="/dashboard.js" defer></script>
 </body>

@@ -1,575 +1,401 @@
 const express = require("express");
 const { authenticateToken } = require("../middleware/auth.middleware");
-const { isAdminEmail } = require("../utils/admin-access");
-const { buildVisitReadWhere } = require("../utils/access-policy");
 
 const router = express.Router();
 router.use(authenticateToken);
 
-const {
-    TEAM_FIELDS,
-    PERIODS,
-    clean,
-    key,
-    uniqueByName,
-    countBy,
-    pairBy,
-    getPeriodStart,
-    monthKey,
-    buildVisitTrend,
-    getDurationMinutes,
-    fetchOrientationRecords,
-    getSourceTeams,
-    buildManagerVisitHierarchy
-} = require("../services/dashboard.service");
+const PERIOD_DAYS = {
+    "7d": 7,
+    "30d": 30,
+    "90d": 90,
+    "365d": 365
+};
 
-// GET /api/dashboard/overview. Application records are company-scoped;
-// Google Sheets rows are scoped to the authenticated user's email or agent name.
+function getStartDate(period) {
+    const days = PERIOD_DAYS[period];
+    if (!days) return null;
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
+
+function groupByMonth(rows, dateSelector) {
+    const counts = new Map();
+    for (const row of rows) {
+        const date = dateSelector(row);
+        if (!date) continue;
+        const d = new Date(date);
+        if (Number.isNaN(d.getTime())) continue;
+        const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+        counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b))
+        .map(([label, value]) => ({ label, value }));
+}
+
+function countBy(rows, selector) {
+    const values = new Map();
+    for (const row of rows) {
+        const label = selector(row);
+        if (!label) continue;
+        values.set(label, (values.get(label) || 0) + 1);
+    }
+    return [...values.entries()]
+        .map(([label, value]) => ({ label, value }))
+        .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+}
+
+function getSalesIdsForRole(user, users, teams) {
+    if (user.role === "OPERATION_DIRECTOR") {
+        return users.map(item => item.id);
+    }
+    if (user.role === "SALES_MANAGER") {
+        const teamIds = new Set(teams.filter(team => team.managerId === user.id).map(team => team.id));
+        return users.filter(item => item.teamId && teamIds.has(item.teamId)).map(item => item.id);
+    }
+    return [user.id];
+}
+
 router.get("/overview", async (req, res, next) => {
     try {
         const user = await req.prisma.user.findUnique({
             where: { id: req.userId },
-            select: { id: true, fullName: true, email: true, isActive: true }
+            select: {
+                id: true, fullName: true, email: true, phone: true,
+                role: true, teamId: true, isActive: true
+            }
         });
-        if (!user || !user.isActive) {
-            return res.status(401).json({ message: "User not found or inactive" });
-        }
-        const isAdmin = isAdminEmail(user.email);
+        if (!user || !user.isActive) return res.status(401).json({ message: "User account is unavailable" });
 
-        const requestedPeriod = String(req.query.period || "all");
-        const period = PERIODS.has(requestedPeriod) ? requestedPeriod : "30d";
-        const startDate = getPeriodStart(period);
-        const requestedCompanyId = clean(req.query.companyId);
+        const periodValue = String(req.query.period || "all");
+        const period = periodValue === "all" || PERIOD_DAYS[periodValue] ? periodValue : "30d";
+        const startDate = getStartDate(period);
 
-        const memberships = isAdmin
-            ? (await req.prisma.company.findMany({
-                where: { isActive: true },
-                orderBy: { name: "asc" },
+        const [salesUsers, teams] = await Promise.all([
+            req.prisma.user.findMany({
+                where: { role: "SALES_MAN" },
+                select: { id: true, fullName: true, email: true, teamId: true }
+            }),
+            req.prisma.team.findMany({
+                where: user.role === "OPERATION_DIRECTOR"
+                    ? { isActive: true }
+                    : user.role === "SALES_MANAGER"
+                        ? { managerId: user.id, isActive: true }
+                        : user.teamId ? { id: user.teamId, isActive: true } : { id: "__none__" },
                 include: {
-                    _count: { select: { members: true, teams: true, visits: true } },
+                    manager: { select: { id: true, fullName: true } },
                     members: {
-                        orderBy: { createdAt: "asc" },
-                        include: {
-                            user: { select: { id: true, fullName: true, email: true, isActive: true } }
-                        }
-                    },
-                    teams: {
-                        orderBy: { name: "asc" },
-                        include: {
-                            _count: { select: { members: true, visits: true } },
-                            members: {
-                                include: {
-                                    user: { select: { id: true, fullName: true, email: true, isActive: true } }
-                                }
-                            }
-                        }
+                        where: {
+                            role: "SALES_MAN",
+                            ...(user.role === "SALES_MAN" ? { id: user.id } : {})
+                        },
+                        select: { id: true, fullName: true, email: true, role: true, isActive: true }
                     }
-                }
-            })).map(company => ({ companyId: company.id, role: "ADMIN", company }))
-            : await req.prisma.companyMember.findMany({
-                where: {
-                    userId: user.id,
-                    company: { isActive: true }
                 },
-                orderBy: { createdAt: "asc" },
-                include: {
-                    company: {
-                        include: {
-                            _count: { select: { members: true, teams: true, visits: true } },
-                            members: {
-                                orderBy: { createdAt: "asc" },
-                                include: {
-                                    user: { select: { id: true, fullName: true, email: true, isActive: true } }
-                                }
-                            },
-                            teams: {
-                                orderBy: { name: "asc" },
-                                include: {
-                                    _count: { select: { members: true, visits: true } },
-                                    members: {
-                                        include: {
-                                            user: { select: { id: true, fullName: true, email: true, isActive: true } }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
-        const companyIds = memberships.map(item => item.companyId);
-        if (requestedCompanyId && !companyIds.includes(requestedCompanyId)) {
-            return res.status(403).json({ message: "You are not a member of this company" });
-        }
-        const selectedCompanyIds = requestedCompanyId ? [requestedCompanyId] : companyIds;
-        const activeMemberships = requestedCompanyId
-            ? memberships.filter(item => item.companyId === requestedCompanyId)
-            : memberships;
-
-        // Sales-agent memberships do not grant access to coworkers' visit details.
-        // Managers/admins need an explicit role policy; until that is implemented,
-        // non-admin accounts receive only visits they created or were assigned.
-        const visitWhere = buildVisitReadWhere({
-            userId: user.id,
-            isGlobalAdmin: isAdmin,
-            companyIds: selectedCompanyIds,
-            startDate
-        });
-        const userEmail = user.email.trim().toLowerCase();
-        const sheetWhere = isAdmin ? {} : { email: userEmail };
-        const dropdownWhere = isAdmin ? {} : { email: userEmail };
-
-        const [visits, visitsTotal, sourceRecords, dropdownRecords, syncedAt, orientationResult] = await Promise.all([
-            companyIds.length
-                ? req.prisma.visit.findMany({
-                    where: visitWhere,
-                    select: {
-                        id: true,
-                        companyId: true,
-                        teamId: true,
-                        createdById: true,
-                        scheduledAt: true,
-                        status: true,
-                        createdAt: true,
-                        clientName: true,
-                        clientPhone: true,
-                        propertyName: true,
-                        propertyAddress: true,
-                        notes: true,
-                        company: { select: { id: true, name: true } },
-                        team: { select: { id: true, name: true } },
-                        createdBy: { select: { id: true, fullName: true, email: true } },
-                        assignments: {
-                            include: {
-                                user: { select: { id: true, fullName: true, email: true } }
-                            }
-                        }
-                    },
-                    orderBy: { scheduledAt: "desc" }
-                })
-                : Promise.resolve([]),
-            selectedCompanyIds.length ? req.prisma.visit.count({ where: visitWhere }) : Promise.resolve(0),
-            req.prisma.googleSheetRecord.findMany({
-                where: sheetWhere,
-                select: {
-                    id: true, serial: true, sourceId: true, team: true,
-                    team1: true, team2: true, team3: true, team4: true, team5: true,
-                    managers: true, salesAgent: true, email: true,
-                    companyName: true, groupName: true, syncedAt: true
-                }
-            }),
-            req.prisma.companyDropdown.findMany({
-                where: dropdownWhere,
-                select: { id: true, dropdownId: true, companyName: true, salesAgent: true, email: true, syncedAt: true },
-                orderBy: { companyName: "asc" }
-            }),
-            req.prisma.googleSheetRecord.findFirst({
-                orderBy: { syncedAt: "desc" },
-                select: { syncedAt: true }
-            }),
-            fetchOrientationRecords(user.email, isAdmin)
+                orderBy: { name: "asc" }
+            })
         ]);
 
-        const lifecycleRows = visits.length
-            ? await req.prisma.$queryRawUnsafe(
-                "SELECT `id`, `startedAt`, `endedAt`, `startLatitude`, `startLongitude`, `endLatitude`, `endLongitude` FROM `Visit` WHERE `id` IN (" + visits.map(() => "?").join(",") + ")",
-                ...visits.map(visit => visit.id)
-            )
-            : [];
-        const lifecycleById = new Map(lifecycleRows.map(row => [row.id, row]));
-        for (const visit of visits) {
-            const lifecycle = lifecycleById.get(visit.id) || {};
-            visit.startedAt = lifecycle.startedAt || null;
-            visit.endedAt = lifecycle.endedAt || null;
-            visit.startLatitude = lifecycle.startLatitude == null ? null : Number(lifecycle.startLatitude);
-            visit.startLongitude = lifecycle.startLongitude == null ? null : Number(lifecycle.startLongitude);
-            visit.endLatitude = lifecycle.endLatitude == null ? null : Number(lifecycle.endLatitude);
-            visit.endLongitude = lifecycle.endLongitude == null ? null : Number(lifecycle.endLongitude);
-        }
-        const personalVisits = visits.filter(visit =>
-            visit.createdById === user.id || visit.assignments.some(item => item.user.id === user.id)
-        ).sort((a, b) => {
-            const activeDifference = Number(b.status === "IN_PROGRESS") - Number(a.status === "IN_PROGRESS");
-            if (activeDifference) return activeDifference;
-            return new Date(b.startedAt || b.scheduledAt).getTime() - new Date(a.startedAt || a.scheduledAt).getTime();
-        });
-        const personalDurations = personalVisits.map(getDurationMinutes).filter(value => value !== null);
-        const averageDurationMinutes = personalDurations.length
-            ? Math.round(personalDurations.reduce((sum, value) => sum + value, 0) / personalDurations.length)
-            : null;
-        const pendingPersonalVisits = personalVisits.filter(visit => visit.status === "IN_PROGRESS").length;
-        const completedPersonalVisits = personalVisits.filter(visit => visit.status === "COMPLETED").length;
-        const personalDurationBuckets = [
-            { label: "Under 30 min", min: 0, max: 30 },
-            { label: "30–60 min", min: 30, max: 60 },
-            { label: "1–2 hr", min: 60, max: 120 },
-            { label: "2–4 hr", min: 120, max: 240 },
-            { label: "4+ hr", min: 240, max: Infinity }
-        ].map(bucket => ({ label: bucket.label, value: personalDurations.filter(value => value >= bucket.min && value < bucket.max).length }))
-          .filter(bucket => bucket.value > 0);
-        const personalVisitsByCompany = countBy(personalVisits, visit => visit.company.name).slice(0, 8);
-        const personalVisitsByStatus = countBy(personalVisits, visit => visit.status);
-        const personalTrend = buildVisitTrend(personalVisits, period);
+        const salesIds = getSalesIdsForRole(user, salesUsers, teams);
+        const effectiveSalesIds = user.role === "SALES_MAN" ? [user.id] : salesIds;
 
-        const allOrientations = orientationResult.records;
-        const orientationRows = allOrientations
-            .filter(row => !startDate || (row.parsedDate && row.parsedDate >= startDate))
-            .sort((a, b) => (b.parsedDate?.getTime() || 0) - (a.parsedDate?.getTime() || 0));
-        const managerHierarchy = isAdmin
-            ? buildManagerVisitHierarchy(orientationRows, sourceRecords, visits)
-            : null;
+        const [orientations, visits, ads, allCompanies] = await Promise.all([
+            effectiveSalesIds.length ? req.prisma.orientation.findMany({
+                where: {
+                    salesId: { in: effectiveSalesIds },
+                    ...(startDate ? { createdAt: { gte: startDate } } : {})
+                },
+                include: {
+                    company: { select: { id: true, name: true } },
+                    sales: { select: { id: true, fullName: true, email: true } }
+                },
+                orderBy: { createdAt: "desc" }
+            }) : Promise.resolve([]),
+            effectiveSalesIds.length ? req.prisma.visit.findMany({
+                where: {
+                    salesId: { in: effectiveSalesIds },
+                    ...(startDate ? { startedAt: { gte: startDate } } : {})
+                },
+                include: {
+                    client: { select: { id: true, name: true, phone: true, email: true } },
+                    clientSource: { select: { id: true, sourceType: true, name: true, phone: true, details: true } },
+                    sales: { select: { id: true, fullName: true, email: true } }
+                },
+                orderBy: { startedAt: "desc" }
+            }) : Promise.resolve([]),
+            effectiveSalesIds.length ? req.prisma.ad.findMany({
+                where: {
+                    salesId: { in: effectiveSalesIds },
+                    ...(startDate ? { createdAt: { gte: startDate } } : {})
+                },
+                include: { sales: { select: { id: true, fullName: true, email: true } } },
+                orderBy: { createdAt: "desc" }
+            }) : Promise.resolve([]),
+            user.role === "OPERATION_DIRECTOR"
+                ? req.prisma.company.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } })
+                : effectiveSalesIds.length
+                    ? req.prisma.company.findMany({
+                        where: { orientations: { some: { salesId: { in: effectiveSalesIds } } } },
+                        select: { id: true, name: true },
+                        orderBy: { name: "asc" }
+                    })
+                    : Promise.resolve([])
+        ]);
 
+        const ownVisits = visits.filter(visit => visit.salesId === user.id);
+        const completedVisits = visits.filter(visit => visit.status === "COMPLETED");
+        const inProgressVisits = visits.filter(visit => visit.status === "IN_PROGRESS");
+        const orientationOnly = orientations.filter(item => item.activityType === "ORIENTATION");
+        const workshops = orientations.filter(item => item.activityType === "WORKSHOP");
 
-        const companies = memberships.map(membership => {
-            const ownCompanyVisits = personalVisits.filter(visit => visit.companyId === membership.company.id);
-            const ownTeamCount = membership.company.teams.filter(team =>
-                team.members.some(member => member.user.id === user.id)
-            ).length;
-            return {
-                id: membership.company.id,
-                name: membership.company.name,
-                role: membership.role,
-                membersCount: isAdmin ? membership.company._count.members : 1,
-                teamsCount: isAdmin ? membership.company._count.teams : ownTeamCount,
-                visitsCount: isAdmin ? membership.company._count.visits : ownCompanyVisits.length,
-                createdAt: membership.company.createdAt
-            };
-        });
-
-        const teams = activeMemberships.flatMap(membership =>
-            membership.company.teams
-                .filter(team => isAdmin || team.members.some(member => member.user.id === user.id))
-                .map(team => ({
-                id: team.id,
-                name: team.name,
-                companyId: membership.company.id,
-                companyName: membership.company.name,
-                membersCount: isAdmin ? team._count.members : 1,
-                visitsCount: isAdmin ? team._count.visits : personalVisits.filter(visit => visit.teamId === team.id).length,
-                members: team.members
-                    .filter(member => isAdmin || member.user.id === user.id)
-                    .map(member => ({
-                    id: member.user.id,
-                    fullName: member.user.fullName,
-                    email: member.user.email,
-                    role: member.role,
-                    isActive: member.user.isActive
-                }))
-            }))
-        );
-
-        const companyMembers = activeMemberships.flatMap(membership =>
-            membership.company.members
-                .filter(member => isAdmin || member.user.id === user.id)
-                .map(member => ({
-                companyId: membership.company.id,
-                companyName: membership.company.name,
-                userId: member.user.id,
-                fullName: member.user.fullName,
-                email: member.user.email,
-                role: member.role,
-                isActive: member.user.isActive,
-                joinedAt: member.createdAt
-            }))
-        );
-
-        const sheetCompanies = uniqueByName(sourceRecords.map(row => row.companyName));
-        const sheetAgents = uniqueByName(sourceRecords.map(row => row.salesAgent));
-        const sheetManagers = uniqueByName(sourceRecords.map(row => row.managers));
-        const sheetGroups = uniqueByName(sourceRecords.map(row => row.groupName));
-        const sheetTeams = uniqueByName(sourceRecords.flatMap(row => TEAM_FIELDS.map(field => row[field])));
-        const sourceTeamRows = sourceRecords.flatMap(row => TEAM_FIELDS.map(field => ({
-            companyName: row.companyName,
-            teamName: row[field],
-            salesAgent: row.salesAgent,
-            managers: row.managers,
-            groupName: row.groupName
-        })));
-
-        const visitsByMonth = countBy([
-            ...visits.map(visit => ({ date: visit.scheduledAt })),
-            ...orientationRows.filter(row => row.parsedDate).map(row => ({ date: row.parsedDate }))
-        ], row => row.date ? monthKey(row.date) : null)
-            .sort((a, b) => a.label.localeCompare(b.label));
-        const visitsByStatus = countBy(visits, visit => visit.status);
-        const visitsByCompany = countBy(orientationRows, row => row.companyName || row.newCompanyName);
-        const visitsByTeam = countBy(visits, visit => visit.team?.name || "Unassigned team");
-        const visitsByCreator = countBy(visits, visit => visit.createdBy.fullName);
-        const visitsByAssignee = countBy(
-            visits.flatMap(visit => visit.assignments.map(item => item.user.fullName))
-        );
-        const orientationByType = countBy(orientationRows, row => row.type);
-        const orientationByBrokerType = countBy(orientationRows, row => row.brokerType);
-        const orientationByCompany = countBy(orientationRows, row => row.companyName || row.newCompanyName);
-        const orientationByAgent = countBy(orientationRows, row => row.salesAgent);
-        const orientationByManager = countBy(orientationRows, row => row.salesManager);
-        const orientationByLocationIn = countBy(orientationRows, row => row.locationIn);
-        const orientationByLocationOut = countBy(orientationRows, row => row.locationOut);
-        const orientationByMonth = countBy(
-            orientationRows.filter(row => row.parsedDate),
-            row => monthKey(row.parsedDate)
-        ).sort((a, b) => a.label.localeCompare(b.label));
-
-        const relationships = {
-            managerToAgents: pairBy(sourceRecords, row => row.managers, row => row.salesAgent),
-            managerToCompanies: pairBy(sourceRecords, row => row.managers, row => row.companyName),
-            agentToCompanies: pairBy(sourceRecords, row => row.salesAgent, row => row.companyName),
-            agentToEmails: pairBy(sourceRecords, row => row.salesAgent, row => row.email),
-            emailToCompanies: pairBy(sourceRecords, row => row.email, row => row.companyName),
-            companyToGroups: pairBy(sourceRecords, row => row.companyName, row => row.groupName),
-            companyToTeams: pairBy(sourceTeamRows, row => row.companyName, row => row.teamName),
-            teamToAgents: pairBy(sourceTeamRows, row => row.teamName, row => row.salesAgent),
-            managerToTeams: pairBy(sourceTeamRows, row => row.managers, row => row.teamName),
-            groupToTeams: pairBy(sourceTeamRows, row => row.groupName, row => row.teamName),
-            dropdownIdToCompany: pairBy(dropdownRecords, row => row.dropdownId, row => row.companyName),
-            dropdownAgentToCompany: pairBy(dropdownRecords, row => row.salesAgent, row => row.companyName),
-            companyToMembers: pairBy(companyMembers, row => row.companyName, row => row.fullName + " (" + row.role + ")"),
-            companyToTeamsDb: pairBy(teams, row => row.companyName, row => row.name),
-            teamToMembersDb: pairBy(teams.flatMap(team => team.members.map(member => ({
-                teamName: team.name,
-                memberName: member.fullName + " (" + member.role + ")"
-            }))), row => row.teamName, row => row.memberName),
-            teamToVisitsDb: pairBy(visits, row => row.team?.name, row => row.company.name),
-            visitToCreator: pairBy(visits, row => row.company.name, row => row.createdBy.fullName),
-            visitToAssignees: pairBy(visits.flatMap(visit => visit.assignments.map(item => ({
-                companyName: visit.company.name,
-                assignee: item.user.fullName
-            }))), row => row.companyName, row => row.assignee),
-            orientationCompanyToAgents: pairBy(orientationRows, row => row.companyName || row.newCompanyName, row => row.salesAgent),
-            orientationAgentToManagers: pairBy(orientationRows, row => row.salesAgent, row => row.salesManager),
-            orientationCompanyToBrokerAdmins: pairBy(orientationRows, row => row.companyName || row.newCompanyName, row => row.brokerAdmin),
-            orientationTypeToBrokerType: pairBy(orientationRows, row => row.type, row => row.brokerType),
-            orientationLocationInToOut: pairBy(orientationRows, row => row.locationIn, row => row.locationOut),
-            orientationEmailToAgents: pairBy(orientationRows, row => row.email, row => row.salesAgent),
-            orientationProjectToCompany: pairBy(orientationRows, row => row.projectId, row => row.companyName || row.newCompanyName),
-            orientationRequestToCompany: pairBy(orientationRows, row => row.requestNumber, row => row.companyName || row.newCompanyName)
-        };
-
-        const missingEmailRecords = sourceRecords.filter(row => !clean(row.email)).length;
-        const missingAgentRecords = sourceRecords.filter(row => !clean(row.salesAgent)).length;
-        const missingCompanyRecords = sourceRecords.filter(row => !clean(row.companyName)).length;
-        const dropdownDirect = dropdownRecords.filter(row =>
-            clean(row.email) && key(row.email) === key(user.email)
-        ).length;
-        const dropdownAgentMatched = dropdownRecords.length - dropdownDirect;
-        const completedVisits = visits.filter(visit => visit.status === "COMPLETED").length;
-        const cancelledVisits = visits.filter(visit => visit.status === "CANCELLED").length;
-        const recentOrientationVisits = orientationRows.slice(0, 10).map((row, index) => ({
-            id: row.serial || "orientation-" + index,
-            recordType: "ORIENTATION",
-            companyName: row.companyName || row.newCompanyName || "—",
-            teamName: row.salesAgent || null,
-            scheduledAt: row.parsedDate ? row.parsedDate.toISOString() : null,
-            date: row.date,
-            timeIn: row.timeIn,
-            timeOut: row.timeOut,
-            locationIn: row.locationIn,
-            locationOut: row.locationOut,
-            brokerType: row.brokerType,
-            newCompanyName: row.newCompanyName,
-            brokerAdmin: row.brokerAdmin,
-            requestNumber: row.requestNumber,
-            projectId: row.projectId,
-            isDuplicate: row.isDuplicate,
-            salesAgent: row.salesAgent,
-            salesManager: row.salesManager,
-            type: row.type,
-            email: row.email,
-            createdBy: row.salesAgent || "—",
-            status: row.type || "ORIENTATION"
-        }));
-
-        const recentDatabaseVisits = visits.slice(0, 10).map(visit => ({
+        const databaseVisits = visits.map(visit => ({
             id: visit.id,
             recordType: "APP_VISIT",
-            companyName: visit.company.name,
-            teamName: visit.team?.name || null,
-            scheduledAt: visit.scheduledAt,
+            salesId: visit.salesId,
+            salesAgent: visit.sales.fullName,
+            createdBy: visit.sales.fullName,
+            clientId: visit.clientId,
+            clientName: visit.client.name,
+            clientPhone: visit.client.phone,
+            clientEmail: visit.client.email,
+            source: visit.source,
+            clientSourceId: visit.clientSourceId,
+            clientSourceType: visit.clientSource.sourceType,
+            clientSourceName: visit.clientSource.name,
+            clientSourcePhone: visit.clientSource.phone,
+            clientSourceDetails: visit.clientSource.details,
             startedAt: visit.startedAt,
+            scheduledAt: visit.startedAt,
             endedAt: visit.endedAt,
-            startLatitude: visit.startLatitude,
-            startLongitude: visit.startLongitude,
-            endLatitude: visit.endLatitude,
-            endLongitude: visit.endLongitude,
+            startLatitude: Number(visit.startLatitude),
+            startLongitude: Number(visit.startLongitude),
+            endLatitude: visit.endLatitude == null ? null : Number(visit.endLatitude),
+            endLongitude: visit.endLongitude == null ? null : Number(visit.endLongitude),
             status: visit.status,
-            clientName: visit.clientName,
-            clientPhone: visit.clientPhone,
-            propertyName: visit.propertyName,
-            propertyAddress: visit.propertyAddress,
             notes: visit.notes,
-            createdBy: visit.createdBy.fullName,
-            salesAgent: visit.createdBy.fullName,
-            assignees: visit.assignments.map(item => item.user.fullName)
+            createdAt: visit.createdAt
         }));
+
+        const appActivities = orientations.map(item => ({
+            id: item.id,
+            recordType: "ORIENTATION",
+            activityType: item.activityType,
+            companyId: item.companyId,
+            companyName: item.company.name,
+            brokerAdmin: item.brokerAdmin,
+            status: item.status,
+            startedAt: item.startedAt,
+            endedAt: item.endedAt,
+            createdAt: item.createdAt,
+            salesId: item.salesId,
+            salesAgent: item.sales.fullName,
+            email: item.sales.email
+        }));
+
+        const adActivityRows = adRecords.map(item => ({
+            ...item,
+            recordType: "AD",
+            activityType: "AD",
+            startedAt: item.createdAt,
+            scheduledAt: item.createdAt,
+            createdBy: item.salesAgent
+        }));
+        const combinedRecent = [
+            ...databaseVisits,
+            ...appActivities.map(item => ({
+                ...item,
+                scheduledAt: item.startedAt,
+                createdBy: item.salesAgent
+            })),
+            ...adActivityRows
+        ].sort((a, b) => new Date(b.startedAt || b.createdAt || 0) - new Date(a.startedAt || a.createdAt || 0));
+
+        const teamPayload = teams.map(team => ({
+            id: team.id,
+            name: team.name,
+            managerId: team.managerId,
+            managerName: team.manager.fullName,
+            membersCount: team.members.length,
+            members: team.members
+        }));
+
+        const summary = {
+            companies: allCompanies.length,
+            members: effectiveSalesIds.length,
+            teams: teams.length,
+            visits: visits.length,
+            visitsInPeriod: visits.length,
+            completedVisits: completedVisits.length,
+            pendingVisits: inProgressVisits.length,
+            cancelledVisits: 0,
+            sourceRecords: 0,
+            sourceCompanies: allCompanies.length,
+            sourceAgents: 0,
+            sourceManagers: 0,
+            sourceTeams: teams.length,
+            sourceGroups: 0,
+            dropdownCompanies: 0
+        };
+
+        const activityMetrics = {
+            meetings: 0,
+            visits: visits.length,
+            orientations: orientationOnly.length,
+            workshops: workshops.length,
+            ads: ads.length
+        };
+        const visibleTeamsById = new Map(teams.map(team => [team.id, team]));
+        const salesUsersById = new Map(salesUsers.map(sales => [sales.id, sales]));
+        const adRecords = ads.map(ad => ({
+            id: ad.id,
+            salesId: ad.salesId,
+            salesAgent: ad.sales.fullName,
+            link: ad.link,
+            createdAt: ad.createdAt
+        }));
+        const visitsByTeam = countBy(visits, visit => {
+            const sales = salesUsersById.get(visit.salesId);
+            return sales?.teamId
+                ? visibleTeamsById.get(sales.teamId)?.name
+                : "Unassigned";
+        });
+        const visitsByClient = countBy(visits, visit => visit.client.name);
+        const visitsByCreator = countBy(visits, visit => visit.sales.fullName);
+        const orientationByCompany = countBy(orientations, item => item.company.name);
+        const orientationByAgent = countBy(orientations, item => item.sales.fullName);
+        const orientationByManager = countBy(orientations, item => {
+            const sales = salesUsersById.get(item.salesId);
+            const team = sales?.teamId ? visibleTeamsById.get(sales.teamId) : null;
+            return team?.manager?.fullName;
+        });
+
+        const managerHierarchy = user.role === "OPERATION_DIRECTOR" || user.role === "SALES_MANAGER"
+            ? {
+                managers: teams.reduce((groups, team) => {
+                    let manager = groups.find(item => item.id === team.managerId);
+                    if (!manager) {
+                        manager = { id: team.managerId, name: team.manager.fullName, visitCount: 0, teams: [], unassignedVisits: [] };
+                        groups.push(manager);
+                    }
+                    const teamVisitRows = visits.filter(visit => team.members.some(member => member.id === visit.salesId));
+                    manager.visitCount += teamVisitRows.length;
+                    manager.teams.push({
+                        id: team.id,
+                        name: team.name,
+                        visitCount: teamVisitRows.length,
+                        agents: team.members.map(member => {
+                            const memberVisits = visits.filter(visit => visit.salesId === member.id);
+                            return {
+                                name: member.fullName,
+                                visitCount: memberVisits.length,
+                                visits: memberVisits.map(visit => ({
+                                    id: visit.id,
+                                    recordType: "APP_VISIT",
+                                    clientName: visit.client.name,
+                                    clientPhone: visit.client.phone,
+                                    source: visit.source,
+                                    scheduledAt: visit.startedAt,
+                                    startedAt: visit.startedAt,
+                                    endedAt: visit.endedAt,
+                                    status: visit.status,
+                                    salesAgent: visit.sales.fullName
+                                }))
+                            };
+                        })
+                    });
+                    return groups;
+                }, []),
+                unassignedAgents: user.role === "OPERATION_DIRECTOR"
+                    ? salesUsers.filter(sales => !sales.teamId).map(sales => ({ name: sales.fullName, visitCount: visits.filter(visit => visit.salesId === sales.id).length, visits: [] }))
+                    : [],
+                unassignedVisits: [],
+                summary: {
+                    managers: teams.length ? new Set(teams.map(team => team.managerId)).size : 0,
+                    teams: teams.length,
+                    unassignedAgents: salesUsers.filter(sales => !sales.teamId).length,
+                    visits: visits.length,
+                    unassignedVisits: 0
+                }
+            }
+            : null;
 
         return res.json({
             success: true,
             generatedAt: new Date().toISOString(),
             period,
-            user: { id: user.id, fullName: user.fullName, email: user.email, role: isAdmin ? "ADMIN" : "USER" },
+            user,
             scope: {
-                companyIds,
-                visitsTotal: visitsTotal + allOrientations.length,
-                appVisitsTotal: visitsTotal,
-                orientationVisitsTotal: allOrientations.length,
-                visitsReturned: visits.length + orientationRows.length,
-                appVisitsReturned: visits.length,
-                orientationVisitsReturned: orientationRows.length,
-                role: isAdmin ? "ADMIN" : "USER",
-                dataScope: isAdmin ? "ALL" : "USER",
-                sourceRecordsScope: isAdmin ? "All Google Sheets records (Global Admin)" : "Exact authenticated email or explicit company membership",
-                sourceRecordsCount: sourceRecords.length
+                role: user.role,
+                dataScope: user.role === "OPERATION_DIRECTOR" ? "ALL" : user.role === "SALES_MANAGER" ? "MANAGED_TEAMS" : "USER",
+                salesIds: effectiveSalesIds,
+                visitsTotal: visits.length + orientations.length,
+                appVisitsTotal: visits.length,
+                orientationVisitsTotal: orientations.length,
+                visitsReturned: visits.length + orientations.length
             },
+            summary,
             personalSummary: {
-                total: personalVisits.length,
-                completed: completedPersonalVisits,
-                pending: pendingPersonalVisits,
-                averageDurationMinutes,
-                completionRate: personalVisits.length ? Math.round(completedPersonalVisits / personalVisits.length * 100) : 0
+                total: ownVisits.length,
+                completed: ownVisits.filter(visit => visit.status === "COMPLETED").length,
+                pending: ownVisits.filter(visit => visit.status === "IN_PROGRESS").length,
+                averageDurationMinutes: null,
+                completionRate: ownVisits.length
+                    ? Math.round(ownVisits.filter(visit => visit.status === "COMPLETED").length / ownVisits.length * 100)
+                    : 0
             },
-            summary: isAdmin ? {
-                companies: activeMemberships.length,
-                members: companyMembers.length,
-                teams: teams.length,
-                visits: visitsTotal + allOrientations.length,
-                visitsInPeriod: visits.length + orientationRows.length,
-                orientationVisits: allOrientations.length,
-                orientationVisitsInPeriod: orientationRows.length,
-                completedVisits,
-                cancelledVisits,
-                sourceRecords: sourceRecords.length,
-                sourceCompanies: sheetCompanies.length,
-                sourceAgents: sheetAgents.length,
-                sourceManagers: sheetManagers.length,
-                sourceTeams: sheetTeams.length,
-                sourceGroups: sheetGroups.length,
-                dropdownCompanies: dropdownRecords.length,
-                dropdownDirectMatches: dropdownDirect,
-                dropdownAgentMatches: dropdownAgentMatched,
-                recordsMissingEmail: missingEmailRecords,
-                recordsMissingAgent: missingAgentRecords,
-                recordsMissingCompany: missingCompanyRecords
-            } : {
-                companies: activeMemberships.length,
-                members: 1,
-                teams: teams.length,
-                visits: personalVisits.length,
-                visitsInPeriod: personalVisits.length,
-                orientationVisits: orientationRows.length,
-                orientationVisitsInPeriod: orientationRows.length,
-                completedVisits: completedPersonalVisits,
-                cancelledVisits: personalVisits.filter(visit => visit.status === "CANCELLED").length,
-                sourceRecords: sourceRecords.length,
-                sourceCompanies: uniqueByName(sourceRecords.map(row => row.companyName)).length,
-                sourceAgents: 0,
-                sourceManagers: 0,
-                sourceTeams: 0,
-                sourceGroups: 0,
-                dropdownCompanies: dropdownRecords.length,
-                dropdownDirectMatches: dropdownDirect,
-                dropdownAgentMatches: 0,
-                recordsMissingEmail: 0,
-                recordsMissingAgent: 0,
-                recordsMissingCompany: 0
-            },
+            activityMetrics,
             charts: {
-                visitsByMonth,
-                visitsByStatus,
-                visitsByCompany,
+                visitsByMonth: groupByMonth(visits, item => item.startedAt),
+                activityByMonth: groupByMonth([...visits, ...orientations, ...ads], item => item.startedAt || item.createdAt),
+                visitsByStatus: [
+                    { label: "IN_PROGRESS", value: inProgressVisits.length },
+                    { label: "COMPLETED", value: completedVisits.length }
+                ],
+                visitsByCompany: visitsByClient,
                 visitsByTeam,
                 visitsByCreator,
-                visitsByAssignee,
-                orientationByMonth,
-                orientationByType,
-                orientationByBrokerType,
+                visitsByAssignee: [],
+                orientationByMonth: groupByMonth(orientations, item => item.startedAt),
+                orientationByType: [
+                    { label: "ORIENTATION", value: orientationOnly.length },
+                    { label: "WORKSHOP", value: workshops.length }
+                ],
                 orientationByCompany,
                 orientationByAgent,
                 orientationByManager,
-                orientationByLocationIn,
-                orientationByLocationOut,
-                sourceByTeam: countBy(sourceTeamRows, row => row.teamName),
-                sourceByGroup: countBy(sourceRecords, row => row.groupName),
-                sourceByAgent: countBy(sourceRecords, row => row.salesAgent),
-                sourceByManager: countBy(sourceRecords, row => row.managers),
-                dropdownByAccessType: [
-                    { label: "Direct email", value: dropdownDirect },
-                    { label: "Sales Agent match", value: dropdownAgentMatched }
-                ].filter(item => item.value > 0),
-                personalVisitsTrend: personalTrend,
-                personalVisitsByStatus,
-                personalVisitsByCompany,
-                personalDurationBuckets
+                personalVisitsTrend: groupByMonth(ownVisits, item => item.startedAt),
+                personalVisitsByStatus: [
+                    { label: "IN_PROGRESS", value: ownVisits.filter(item => item.status === "IN_PROGRESS").length },
+                    { label: "COMPLETED", value: ownVisits.filter(item => item.status === "COMPLETED").length }
+                ]
             },
-            relationships: isAdmin ? relationships : {},
-            companies,
-            teams,
-            companyMembers,
-            managerHierarchy: isAdmin ? managerHierarchy : null,
-            orientationVisits: orientationRows.map((row, index) => ({
-                id: row.serial || "orientation-" + index,
-                serial: row.serial,
-                projectId: row.projectId,
-                email: row.email,
-                date: row.date,
-                timeIn: row.timeIn,
-                timeOut: row.timeOut,
-                locationIn: row.locationIn,
-                locationOut: row.locationOut,
-                brokerType: row.brokerType,
-                newCompanyName: row.newCompanyName,
-                brokerAdmin: row.brokerAdmin,
-                requestNumber: row.requestNumber,
-                companyName: row.companyName,
-                isDuplicate: row.isDuplicate,
-                salesAgent: row.salesAgent,
-                salesManager: row.salesManager,
-                type: row.type
+            companies: allCompanies,
+            teams: teamPayload,
+            companyMembers: [],
+            managerHierarchy,
+            appActivities,
+            ads: adRecords,
+            recentAds: adRecords.slice(0, 20),
+            orientationVisits: appActivities.map(item => ({
+                id: item.id,
+                recordType: "ORIENTATION",
+                companyName: item.companyName,
+                brokerAdmin: item.brokerAdmin,
+                salesAgent: item.salesAgent,
+                type: item.activityType,
+                status: item.status,
+                startedAt: item.startedAt,
+                endedAt: item.endedAt,
+                scheduledAt: item.startedAt,
+                createdBy: item.salesAgent
             })),
-            databaseVisits: (isAdmin ? visits : personalVisits).map(visit => ({
-                id: visit.id, recordType: "APP_VISIT", companyName: visit.company.name,
-                teamName: visit.team?.name || null, scheduledAt: visit.scheduledAt,
-                startedAt: visit.startedAt, endedAt: visit.endedAt,
-                startLatitude: visit.startLatitude, startLongitude: visit.startLongitude,
-                endLatitude: visit.endLatitude, endLongitude: visit.endLongitude,
-                status: visit.status, clientName: visit.clientName, clientPhone: visit.clientPhone,
-                propertyName: visit.propertyName, propertyAddress: visit.propertyAddress,
-                notes: visit.notes, createdBy: visit.createdBy.fullName, salesAgent: visit.createdBy.fullName
-            })),
-            personalRecentVisits: personalVisits.slice(0, 10).map(visit => ({
-                id: visit.id, recordType: "APP_VISIT", companyName: visit.company.name,
-                teamName: visit.team?.name || null, scheduledAt: visit.scheduledAt,
-                startedAt: visit.startedAt, endedAt: visit.endedAt,
-                startLatitude: visit.startLatitude, startLongitude: visit.startLongitude,
-                endLatitude: visit.endLatitude, endLongitude: visit.endLongitude,
-                status: visit.status, clientName: visit.clientName, clientPhone: visit.clientPhone,
-                propertyName: visit.propertyName, propertyAddress: visit.propertyAddress,
-                notes: visit.notes, createdBy: visit.createdBy.fullName, salesAgent: visit.createdBy.fullName
-            })),
-            recentVisits: [...recentOrientationVisits, ...recentDatabaseVisits]
-                .sort((a, b) => new Date(b.scheduledAt || 0).getTime() - new Date(a.scheduledAt || 0).getTime())
-                .slice(0, 10),
-            orientationSource: {
-                status: orientationResult.error ? "error" : "connected",
-                scope: isAdmin ? "ALL" : "USER",
-                recordsReturned: allOrientations.length,
-                recordsInPeriod: orientationRows.length,
-                fetchedAt: orientationResult.fetchedAt,
-                error: orientationResult.error
-            },
-            dataQuality: {
-                sourceRecordsMissingEmail: missingEmailRecords,
-                sourceRecordsMissingAgent: missingAgentRecords,
-                sourceRecordsMissingCompany: missingCompanyRecords,
-                companyDropdownMissingEmail: dropdownRecords.filter(row => !clean(row.email)).length,
-                orientationMissingCompany: allOrientations.filter(row => !row.companyName && !row.newCompanyName).length,
-                orientationMissingAgent: allOrientations.filter(row => !row.salesAgent).length,
-                orientationMissingEmail: allOrientations.filter(row => !row.email).length
-            },
-            lastGoogleSheetSyncAt: isAdmin ? (syncedAt?.syncedAt ?? null) : null
+            databaseVisits,
+            recentVisits: combinedRecent.slice(0, 30),
+            personalRecentVisits: databaseVisits.filter(item => item.salesId === user.id).slice(0, 10),
+            orientationSource: { status: "database", scope: user.role, recordsReturned: orientations.length },
+            dataQuality: { sourceRecordsMissingEmail: 0, sourceRecordsMissingAgent: 0, sourceRecordsMissingCompany: 0 },
+            lastGoogleSheetSyncAt: null
         });
     } catch (error) {
-        next(error);
+        return next(error);
     }
 });
 

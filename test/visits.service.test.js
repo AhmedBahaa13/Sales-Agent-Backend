@@ -1,145 +1,237 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
-    getVisitAccess,
+    normalizeVisitInput,
     startVisit,
+    getVisitOptions,
     completeVisit
 } = require("../src/services/visits.service");
 
-function accessPrisma(overrides = {}) {
-    const user = {
-        id: "user-1",
-        fullName: "Same Display Name",
-        email: "agent@example.com",
-        isActive: true
-    };
+function baseVisitInput(overrides = {}) {
     return {
-        user: { findUnique: async () => user },
-        companyDropdown: { findMany: async () => [] },
-        googleSheetRecord: { findMany: async () => [] },
-        companyMember: { findMany: async () => [] },
-        company: { findMany: async () => [] },
+        clientName: "Client One",
+        clientPhone: "01000000000",
+        clientEmail: "client@example.com",
+        source: "DIRECT",
+        sourceDetails: {
+            sourceType: "Referral",
+            name: "Referrer One",
+            phone: "01111111111",
+            details: "Introduced by an existing customer"
+        },
+        notes: "First meeting",
+        startLatitude: 30.0444,
+        startLongitude: 31.2357,
         ...overrides
     };
 }
 
-test("visit access does not grant company access by display name", async () => {
-    const prisma = accessPrisma({
-        companyDropdown: {
-            findMany: async () => [
-                { companyName: "Owned by Another Agent", salesAgent: "Same Display Name", email: "other@example.com" }
-            ]
+function transactionPrisma(txOverrides = {}) {
+    const calls = { clientCreate: null, sourceCreate: null, visitCreate: null, visitUpdate: null };
+    const tx = {
+        $queryRawUnsafe: async () => [{ id: "sales-1", role: "SALES_MAN", isActive: true }],
+        user: {
+            findUnique: async () => ({ id: "sales-1", role: "SALES_MAN", isActive: true })
         },
-        googleSheetRecord: {
-            findMany: async () => [
-                { companyName: "Another Agent Source", salesAgent: "Same Display Name", email: "other@example.com" }
-            ]
-        }
-    });
-
-    const access = await getVisitAccess(prisma, "user-1");
-    assert.deepEqual(access.companies, []);
-});
-
-test("visit access includes exact account-email records", async () => {
-    const prisma = accessPrisma({
-        companyDropdown: {
-            findMany: async () => [
-                { companyName: "Assigned Company", salesAgent: "Sales Agent", email: "agent@example.com" }
-            ]
-        }
-    });
-
-    const access = await getVisitAccess(prisma, "user-1");
-    assert.deepEqual(access.companies, ["Assigned Company"]);
-});
-
-test("starting a second visit is rejected while another visit is pending", async () => {
-    const prisma = accessPrisma({
-        companyMember: {
-            findMany: async () => [{ company: { name: "Assigned Company" } }]
-        }
-    });
-    let createCalled = false;
-    prisma.$transaction = async callback => callback({
-        $queryRawUnsafe: async () => [{ id: "user-1" }],
         visit: {
-            findFirst: async () => ({ id: "active-visit" }),
-            create: async () => {
-                createCalled = true;
-                throw new Error("Should not create a second visit");
+            findFirst: async () => null,
+            create: async ({ data }) => {
+                calls.visitCreate = data;
+                return {
+                    id: "visit-1",
+                    ...data,
+                    startedAt: new Date("2026-11-27T10:00:00.000Z"),
+                    startLatitude: data.startLatitude,
+                    startLongitude: data.startLongitude,
+                    status: "IN_PROGRESS",
+                    notes: data.notes,
+                    createdAt: new Date("2026-11-27T10:00:00.000Z"),
+                    client: { id: data.clientId, name: "Client One", phone: "01000000000", email: "client@example.com" },
+                    clientSource: { id: data.clientSourceId, sourceType: "Referral", name: "Referrer One", phone: "01111111111", details: "Introduced" },
+                    sales: { id: data.salesId, fullName: "Sales One" }
+                };
+            },
+            findUnique: async () => ({
+                id: "visit-1",
+                salesId: "sales-1",
+                status: "IN_PROGRESS",
+                startedAt: new Date("2026-11-27T10:00:00.000Z")
+            }),
+            updateMany: async ({ data }) => {
+                calls.visitUpdate = data;
+                return { count: 1 };
             }
+        },
+        client: {
+            findFirst: async () => null,
+            create: async ({ data }) => {
+                calls.clientCreate = data;
+                return { id: "client-1" };
+            },
+            update: async ({ data }) => ({ id: "client-1", ...data })
+        },
+        clientSource: {
+            create: async ({ data }) => {
+                calls.sourceCreate = data;
+                return { id: "source-1", ...data };
+            },
+            findFirst: async () => ({
+                id: "source-1", sourceType: "Referral", name: "Referrer One",
+                phone: "01111111111", details: "Introduced"
+            })
+        },
+    };
+    if (txOverrides.visit) tx.visit = { ...tx.visit, ...txOverrides.visit };
+    if (txOverrides.client) tx.client = { ...tx.client, ...txOverrides.client };
+    if (txOverrides.clientSource) tx.clientSource = { ...tx.clientSource, ...txOverrides.clientSource };
+    if (txOverrides.$queryRawUnsafe) tx.$queryRawUnsafe = txOverrides.$queryRawUnsafe;
+    return {
+        calls,
+        prisma: {
+            $transaction: async callback => callback(tx)
+        }
+    };
+}
+
+test("direct visit requires source type and source name", () => {
+    assert.throws(
+        () => normalizeVisitInput({
+            clientName: "Client One",
+            source: "DIRECT",
+            sourceDetails: { sourceType: "Referral" }
+        }),
+        error => error.status === 400
+    );
+});
+
+test("indirect visit requires a saved client source id", () => {
+    assert.throws(
+        () => normalizeVisitInput({
+            clientName: "Client One",
+            source: "INDIRECT"
+        }),
+        error => error.status === 400
+    );
+});
+
+test("direct visit creates a client source and links visit to client and sales man", async () => {
+    const { prisma, calls } = transactionPrisma();
+    const visit = await startVisit(prisma, "sales-1", baseVisitInput());
+
+    assert.equal(calls.clientCreate.createdById, "sales-1");
+    assert.equal(calls.sourceCreate.createdById, "sales-1");
+    assert.equal(calls.sourceCreate.sourceType, "Referral");
+    assert.equal(calls.visitCreate.salesId, "sales-1");
+    assert.equal(calls.visitCreate.clientId, "client-1");
+    assert.equal(calls.visitCreate.clientSourceId, "source-1");
+    assert.equal(calls.visitCreate.source, "DIRECT");
+    assert.equal("companyId" in calls.visitCreate, false);
+    assert.equal("teamId" in calls.visitCreate, false);
+    assert.equal(visit.id, "visit-1");
+});
+
+test("indirect visit selects only a source owned by the current sales man", async () => {
+    const { prisma, calls } = transactionPrisma();
+    await startVisit(prisma, "sales-1", baseVisitInput({
+        source: "INDIRECT",
+        clientSourceId: "source-1",
+        sourceDetails: null
+    }));
+
+    assert.equal(calls.sourceCreate, null);
+    assert.equal(calls.visitCreate.clientSourceId, "source-1");
+    assert.equal(calls.visitCreate.source, "INDIRECT");
+});
+
+test("indirect visit rejects a source that does not belong to the sales man", async () => {
+    const { prisma } = transactionPrisma({
+        clientSource: {
+            create: async () => { throw new Error("Should not create a source"); },
+            findFirst: async () => null
         }
     });
 
     await assert.rejects(
-        () => startVisit(prisma, "user-1", {
-            companyName: "Assigned Company",
-            clientName: "Client",
-            propertyAddress: "Address",
-            startLatitude: 30.0444,
-            startLongitude: 31.2357
-        }),
-        error => error.status === 409
-    );
-    assert.equal(createCalled, false);
-});
-
-test("only the creator or an assignee can complete a visit", async () => {
-    let updateCalled = false;
-    const prisma = {
-        $transaction: async callback => callback({
-            $queryRawUnsafe: async () => [{ id: "other-user" }],
-            visit: {
-                findUnique: async () => ({
-                    id: "visit-1",
-                    status: "IN_PROGRESS",
-                    createdById: "owner-user",
-                    scheduledAt: new Date("2026-11-20T10:00:00.000Z"),
-                    startedAt: new Date("2026-11-20T10:00:00.000Z"),
-                    assignments: [{ userId: "owner-user" }]
-                }),
-                updateMany: async () => {
-                    updateCalled = true;
-                    return { count: 1 };
-                }
-            }
-        })
-    };
-
-    await assert.rejects(
-        () => completeVisit(prisma, "other-user", "visit-1", {
-            endLatitude: 30.0444,
-            endLongitude: 31.2357
-        }),
+        () => startVisit(prisma, "sales-1", baseVisitInput({
+            source: "INDIRECT",
+            clientSourceId: "other-sales-source",
+            sourceDetails: null
+        })),
         error => error.status === 403
     );
-    assert.equal(updateCalled, false);
 });
 
-test("a visit cannot be completed twice", async () => {
-    const prisma = {
-        $transaction: async callback => callback({
-            $queryRawUnsafe: async () => [{ id: "user-1" }],
-            visit: {
-                findUnique: async () => ({
-                    id: "visit-1",
-                    status: "COMPLETED",
-                    createdById: "user-1",
-                    scheduledAt: new Date("2026-11-20T10:00:00.000Z"),
-                    startedAt: new Date("2026-11-20T10:00:00.000Z"),
-                    assignments: [{ userId: "user-1" }]
-                }),
-                updateMany: async () => ({ count: 0 })
-            }
-        })
-    };
+test("a second active visit is rejected", async () => {
+    const { prisma, calls } = transactionPrisma({
+        visit: {
+            findFirst: async () => ({ id: "active-visit" }),
+            create: async () => { throw new Error("Should not create a second visit"); }
+        }
+    });
 
     await assert.rejects(
-        () => completeVisit(prisma, "user-1", "visit-1", {
-            endLatitude: 30.0444,
-            endLongitude: 31.2357
-        }),
+        () => startVisit(prisma, "sales-1", baseVisitInput()),
         error => error.status === 409
+    );
+    assert.equal(calls.visitCreate, null);
+});
+
+test("only Sales Men can create visits", async () => {
+    const { prisma } = transactionPrisma({
+        $queryRawUnsafe: async () => [{ id: "manager-1", role: "SALES_MANAGER", isActive: true }]
+    });
+    await assert.rejects(
+        () => startVisit(prisma, "manager-1", baseVisitInput()),
+        error => error.status === 403
+    );
+});
+
+test("Sales Men see only their own saved sources and canCreateVisit", async () => {
+    const prisma = {
+        user: {
+            findUnique: async () => ({ id: "sales-1", fullName: "Sales One", role: "SALES_MAN", isActive: true })
+        },
+        visit: { findFirst: async () => null },
+        clientSource: {
+            findMany: async ({ where }) => {
+                assert.deepEqual(where, { createdById: "sales-1" });
+                return [{ id: "source-1", sourceType: "Referral", name: "Referrer" }];
+            }
+        }
+    };
+
+    const options = await getVisitOptions(prisma, "sales-1");
+    assert.equal(options.canCreateVisit, true);
+    assert.equal(options.clientSources.length, 1);
+});
+
+test("completing a visit updates only the owner's active visit", async () => {
+    const { prisma, calls } = transactionPrisma();
+    const result = await completeVisit(prisma, "sales-1", "visit-1", {
+        endLatitude: 30.0500,
+        endLongitude: 31.2400
+    });
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(calls.visitUpdate.status, "COMPLETED");
+});
+
+test("another Sales Man cannot complete someone else's visit", async () => {
+    const { prisma } = transactionPrisma({
+        visit: {
+            findUnique: async () => ({
+                id: "visit-1",
+                salesId: "other-sales",
+                status: "IN_PROGRESS",
+                startedAt: new Date()
+            })
+        }
+    });
+
+    await assert.rejects(
+        () => completeVisit(prisma, "sales-1", "visit-1", {
+            endLatitude: 30.0500,
+            endLongitude: 31.2400
+        }),
+        error => error.status === 403
     );
 });

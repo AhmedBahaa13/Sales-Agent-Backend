@@ -1,13 +1,20 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const state = { token: sessionStorage.getItem("brokerflow_token") || "", user: null, data: null, language: localStorage.getItem("brokerflow_language") || "en" };
+  const state = {
+    token: sessionStorage.getItem("brokerflow_token") || "",
+    refreshToken: sessionStorage.getItem("brokerflow_refresh_token") || "",
+    user: null,
+    data: null,
+    language: localStorage.getItem("brokerflow_language") || "en"
+  };
+  let refreshPromise = null;
   const words = {
     en: {
-      visits:"visits",relationships:"relationships",welcome:"Welcome back",loginSubtitle:"Sign in to explore your sales performance and business relationships.",email:"Email address",password:"Password",signIn:"Sign in",workspace:"WORKSPACE",overview:"Overview",relationships:"Relationships",visits:"Visits",signOut:"Sign out",workspaceOverview:"WORKSPACE OVERVIEW",dashboard:"Dashboard",analyticsFor:"Analytics for",allCompanies:"All companies",last7:"Last 7 days",last30:"Last 30 days",last90:"Last 90 days",last365:"Last 12 months",allTime:"All time",visitTrend:"My visit activity",visitTrendSub:"Your visits over the selected period",visitStatus:"My visit status",visitStatusSub:"Pending and completed visits",teamPerformance:"Visit duration",teamPerformanceSub:"How long completed visits take",visitDuration:"Visit duration",visitDurationSub:"Completed visits grouped by duration",myVisits:"My visits",myCompleted:"Completed",myPending:"Pending",averageDuration:"Average duration",topCompanies:"My top companies",topCompaniesSub:"Your visits by company",sourceTeams:"Teams in Google Sheets",sourceTeamsSub:"Current source relationships",agentActivity:"Sales agent activity",agentActivitySub:"Source records by sales agent",dataExplorer:"DATA EXPLORER",relationshipMap:"Relationship explorer",relationshipSub:"Explore how managers, agents, companies, teams and groups connect.",from:"FROM",to:"CONNECTED TO",records:"RECORDS",dataHealth:"Data health",dataHealthSub:"Missing fields in your source data",recentVisits:"Recent visits",recentVisitsSub:"Latest activity in your companies",footer:"Sales intelligence workspace",totalCompanies:"Companies",members:"Company members",teams:"Teams",totalVisits:"Visits in period",completed:"Completed visits",cancelled:"Cancelled visits",sourceRecords:"Source records",sourceCompanies:"Source companies",sourceAgents:"Sales agents",sourceManagers:"Sales managers",sourceTeamsKpi:"Source teams",sourceGroups:"Client groups",dropdownCompanies:"Dropdown companies",noData:"No data available for this selection",loading:"Loading dashboard…",loginFailed:"Unable to sign in. Check your credentials.",sessionExpired:"Your session expired. Please sign in again.",networkError:"Unable to load dashboard data. Please try again.",directMatches:"Direct email matches",agentMatches:"Sales Agent matches",missingEmail:"Records without email",missingAgent:"Records without Sales Agent",missingCompany:"Records without company",allRelationships:"All relationships",managerToAgents:"Manager → Sales Agents",managerToCompanies:"Manager → Companies",agentToCompanies:"Sales Agent → Companies",agentToEmails:"Sales Agent → Emails",emailToCompanies:"Email → Companies",companyToGroups:"Company → Client Groups",companyToTeams:"Company → Source Teams",teamToAgents:"Team → Sales Agents",managerToTeams:"Manager → Teams",groupToTeams:"Client Group → Teams",dropdownIdToCompany:"Dropdown ID → Company",dropdownAgentToCompany:"Dropdown Sales Agent → Company",companyToMembers:"Company → Members",companyToTeamsDb:"Company → App Teams",teamToMembersDb:"App Team → Members",teamToVisitsDb:"Team → Company visits",visitToCreator:"Company → Visit creators",visitToAssignees:"Company → Visit assignees",orientationCompanyToAgents:"Orientation company → Sales Agents",orientationAgentToManagers:"Orientation Sales Agent → Managers",orientationCompanyToBrokerAdmins:"Company → Broker Admins",orientationTypeToBrokerType:"Activity → Broker Type",orientationLocationInToOut:"Check-in → Check-out locations",orientationEmailToAgents:"Email → Sales Agents",orientationProjectToCompany:"Project ID → Company",orientationRequestToCompany:"Request → Company",managerVisits:"Visits by manager and team",managerVisitsSub:"All managers, teams, sales agents and their visits",unassignedSales:"Sales agents without a manager",noManagerFound:"No manager relationship was found for this sales agent.",noAdminHierarchy:"No manager or sales hierarchy data is available.",noRelationships:"No relationships found for this selection.",sourceData:"Google Sheets",noRecentVisits:"No recent visits in this period.",refresh:"Dashboard updated",lastSync:"Last sync",notSynced:"Sync time unavailable",unknown:"Unknown",scheduled:"Scheduled",inProgress:"Pending",completedStatus:"Completed",cancelledStatus:"Cancelled",noShow:"No show",unassigned:"Unassigned team",visitsCount:"visits",recordsCount:"records",createdBy:"Created by",direct:"Direct email",agentMatch:"Agent match",dataQuality:"Source data quality"
+      visits:"visits",relationships:"relationships",meetings:"Meetings",orientations:"Orientations",workshops:"Workshops",ads:"Ads",addActivity:"Add activity",createRecord:"CREATE RECORD",activityType:"Activity type",orientation:"Orientation",workshop:"Workshop",brokerType:"Broker type",newBroker:"New Broker",existingBroker:"Existing Broker",companyName:"Company name",searchCompanies:"Search assigned companies",searchCompanyPlaceholder:"Search company name",assignedCompany:"Assigned company",eligibleBrokerHint:"Only brokers with at least one previous Orientation are shown.",searchEligible:"Search eligible brokers",searchEligiblePlaceholder:"Search broker name",eligibleBroker:"Eligible broker",noEligibleBrokers:"No eligible brokers yet. Record an Orientation first.",brokerAdmin:"Broker Admin",requestNumber:"Request Number (optional)",cancel:"Cancel",saveActivity:"Save activity",activityBreakdown:"Activity breakdown",activityBreakdownSub:"Meetings, visits, orientations, workshops and ads in the selected period",activityTrend:"Activity trend",activityTrendSub:"All recorded activities by month in the selected period",withinSelectedPeriod:"In the selected period",welcome:"Welcome back",loginSubtitle:"Sign in to explore your sales performance and business relationships.",email:"Email address",password:"Password",signIn:"Sign in",workspace:"WORKSPACE",overview:"Overview",relationships:"Relationships",visits:"Visits",signOut:"Sign out",workspaceOverview:"WORKSPACE OVERVIEW",dashboard:"Dashboard",analyticsFor:"Analytics for",allCompanies:"All companies",last7:"Last 7 days",last30:"Last 30 days",last90:"Last 90 days",last365:"Last 12 months",allTime:"All time",visitTrend:"My visit activity",visitTrendSub:"Your visits over the selected period",visitStatus:"My visit status",visitStatusSub:"Pending and completed visits",teamPerformance:"Visit duration",teamPerformanceSub:"How long completed visits take",visitDuration:"Visit duration",visitDurationSub:"Completed visits grouped by duration",myVisits:"My visits",myCompleted:"Completed",myPending:"Pending",averageDuration:"Average duration",topCompanies:"Top clients",topCompaniesSub:"Your visits by client",sourceTeams:"Teams in Google Sheets",sourceTeamsSub:"Current source relationships",agentActivity:"Sales agent activity",agentActivitySub:"Source records by sales agent",dataExplorer:"DATA EXPLORER",relationshipMap:"Relationship explorer",relationshipSub:"Explore how managers, agents, companies, teams and groups connect.",from:"FROM",to:"CONNECTED TO",records:"RECORDS",dataHealth:"Data health",dataHealthSub:"Missing fields in your source data",recentVisits:"Recent visits",recentVisitsSub:"Latest activity in your companies",footer:"Sales intelligence workspace",totalCompanies:"Companies",members:"Company members",teams:"Teams",totalVisits:"Visits in period",completed:"Completed visits",cancelled:"Cancelled visits",sourceRecords:"Source records",sourceCompanies:"Source companies",sourceAgents:"Sales agents",sourceManagers:"Sales managers",sourceTeamsKpi:"Source teams",sourceGroups:"Client groups",dropdownCompanies:"Dropdown companies",noData:"No data available for this selection",loading:"Loading dashboard…",loginFailed:"Unable to sign in. Check your credentials.",sessionExpired:"Your session expired. Please sign in again.",networkError:"Unable to load dashboard data. Please try again.",directMatches:"Direct email matches",agentMatches:"Sales Agent matches",missingEmail:"Records without email",missingAgent:"Records without Sales Agent",missingCompany:"Records without company",allRelationships:"All relationships",managerToAgents:"Manager → Sales Agents",managerToCompanies:"Manager → Companies",agentToCompanies:"Sales Agent → Companies",agentToEmails:"Sales Agent → Emails",emailToCompanies:"Email → Companies",companyToGroups:"Company → Client Groups",companyToTeams:"Company → Source Teams",teamToAgents:"Team → Sales Agents",managerToTeams:"Manager → Teams",groupToTeams:"Client Group → Teams",dropdownIdToCompany:"Dropdown ID → Company",dropdownAgentToCompany:"Dropdown Sales Agent → Company",companyToMembers:"Company → Members",companyToTeamsDb:"Company → App Teams",teamToMembersDb:"App Team → Members",teamToVisitsDb:"Team → Company visits",visitToCreator:"Company → Visit creators",visitToAssignees:"Company → Visit assignees",orientationCompanyToAgents:"Orientation company → Sales Agents",orientationAgentToManagers:"Orientation Sales Agent → Managers",orientationCompanyToBrokerAdmins:"Company → Broker Admins",orientationTypeToBrokerType:"Activity → Broker Type",orientationLocationInToOut:"Check-in → Check-out locations",orientationEmailToAgents:"Email → Sales Agents",orientationProjectToCompany:"Project ID → Company",orientationRequestToCompany:"Request → Company",managerVisits:"Visits by manager and team",managerVisitsSub:"All managers, teams, sales agents and their visits",unassignedSales:"Sales agents without a manager",noManagerFound:"No manager relationship was found for this sales agent.",noAdminHierarchy:"No manager or sales hierarchy data is available.",noRelationships:"No relationships found for this selection.",sourceData:"Google Sheets",noRecentVisits:"No recent visits in this period.",refresh:"Dashboard updated",lastSync:"Last sync",notSynced:"Sync time unavailable",unknown:"Unknown",scheduled:"Scheduled",inProgress:"Pending",completedStatus:"Completed",cancelledStatus:"Cancelled",noShow:"No show",unassigned:"Unassigned team",visitsCount:"visits",recordsCount:"records",createdBy:"Created by",direct:"Direct email",agentMatch:"Agent match",dataQuality:"Source data quality"
     },
     ar: {
-      visits:"زيارة",relationships:"العلاقات",welcome:"مرحبًا بعودتك",loginSubtitle:"سجّل الدخول لمتابعة أداء المبيعات والعلاقات بين البيانات.",email:"البريد الإلكتروني",password:"كلمة المرور",signIn:"تسجيل الدخول",workspace:"مساحة العمل",overview:"نظرة عامة",relationships:"العلاقات",visits:"الزيارات",signOut:"تسجيل الخروج",workspaceOverview:"نظرة عامة على مساحة العمل",dashboard:"لوحة التحكم",analyticsFor:"التحليلات خلال",allCompanies:"كل الشركات",last7:"آخر 7 أيام",last30:"آخر 30 يومًا",last90:"آخر 90 يومًا",last365:"آخر 12 شهرًا",allTime:"كل الوقت",visitTrend:"نشاط زياراتي",visitTrendSub:"عدد زياراتك خلال الفترة المحددة",visitStatus:"حالة زياراتي",visitStatusSub:"الزيارات المعلقة والمكتملة",teamPerformance:"مدة الزيارة",teamPerformanceSub:"المدة التي تستغرقها الزيارات المكتملة",visitDuration:"مدة الزيارة",visitDurationSub:"توزيع الزيارات المكتملة حسب المدة",myVisits:"زياراتي",myCompleted:"مكتملة",myPending:"معلقة",averageDuration:"متوسط المدة",topCompanies:"أكثر الشركات زيارة",topCompaniesSub:"عدد زياراتك لكل شركة",sourceTeams:"الفرق في Google Sheets",sourceTeamsSub:"العلاقات الحالية في بيانات المصدر",agentActivity:"نشاط مندوبي المبيعات",agentActivitySub:"سجلات المصدر حسب المندوب",dataExplorer:"مستكشف البيانات",relationshipMap:"مستكشف العلاقات",relationshipSub:"استكشف ارتباط المديرين والمندوبين والشركات والفرق والمجموعات.",from:"من",to:"مرتبط بـ",records:"السجلات",dataHealth:"جودة البيانات",dataHealthSub:"الحقول الناقصة في بيانات المصدر",recentVisits:"أحدث الزيارات",recentVisitsSub:"آخر الأنشطة في شركاتك",footer:"مساحة عمل ذكاء المبيعات",totalCompanies:"الشركات",members:"أعضاء الشركات",teams:"الفرق",totalVisits:"الزيارات خلال الفترة",completed:"الزيارات المكتملة",cancelled:"الزيارات الملغاة",sourceRecords:"سجلات المصدر",sourceCompanies:"شركات المصدر",sourceAgents:"مندوبو المبيعات",sourceManagers:"مديرو المبيعات",sourceTeamsKpi:"فرق المصدر",sourceGroups:"مجموعات العملاء",dropdownCompanies:"شركات القائمة",noData:"لا توجد بيانات لهذا الاختيار",loading:"جارٍ تحميل لوحة التحكم…",loginFailed:"تعذر تسجيل الدخول. راجع بيانات الحساب.",sessionExpired:"انتهت الجلسة. سجّل الدخول مرة أخرى.",networkError:"تعذر تحميل بيانات لوحة التحكم. حاول مرة أخرى.",directMatches:"مطابقة البريد مباشرة",agentMatches:"مطابقة اسم المندوب",missingEmail:"سجلات بدون بريد",missingAgent:"سجلات بدون مندوب",missingCompany:"سجلات بدون شركة",allRelationships:"كل العلاقات",managerToAgents:"المدير ← مندوبو المبيعات",managerToCompanies:"المدير ← الشركات",agentToCompanies:"المندوب ← الشركات",agentToEmails:"المندوب ← البريد الإلكتروني",emailToCompanies:"البريد الإلكتروني ← الشركات",companyToGroups:"الشركة ← مجموعات العملاء",companyToTeams:"الشركة ← فرق المصدر",teamToAgents:"الفريق ← مندوبو المبيعات",managerToTeams:"المدير ← الفرق",groupToTeams:"مجموعة العملاء ← الفرق",dropdownIdToCompany:"كود القائمة ← الشركة",dropdownAgentToCompany:"مندوب القائمة ← الشركة",companyToMembers:"الشركة ← الأعضاء",companyToTeamsDb:"الشركة ← فرق التطبيق",teamToMembersDb:"فريق التطبيق ← الأعضاء",teamToVisitsDb:"الفريق ← زيارات الشركة",visitToCreator:"الشركة ← منشئو الزيارات",visitToAssignees:"الشركة ← المسؤولون عن الزيارات",orientationCompanyToAgents:"شركات الزيارات ← المندوبون",orientationAgentToManagers:"مندوبو الزيارات ← المديرون",orientationCompanyToBrokerAdmins:"الشركة ← مسؤولوها",orientationTypeToBrokerType:"نوع النشاط ← نوع الوسيط",orientationLocationInToOut:"مواقع الدخول ← الخروج",orientationEmailToAgents:"البريد ← المندوبون",orientationProjectToCompany:"كود المشروع ← الشركة",orientationRequestToCompany:"الطلب ← الشركة",managerVisits:"الزيارات حسب المدير والفريق",managerVisitsSub:"كل المديرين والفرق والمندوبين والزيارات التابعة لهم",unassignedSales:"مندوبو المبيعات بدون مدير",noManagerFound:"لم يتم العثور على مدير مرتبط بهذا المندوب.",noAdminHierarchy:"لا تتوفر بيانات للمديرين أو هيكل المبيعات.",noRelationships:"لا توجد علاقات لهذا الاختيار.",sourceData:"Google Sheets",noRecentVisits:"لا توجد زيارات حديثة خلال هذه الفترة.",refresh:"تم تحديث لوحة التحكم",lastSync:"آخر مزامنة",notSynced:"وقت المزامنة غير متاح",unknown:"غير معروف",scheduled:"مجدولة",inProgress:"معلقة",completedStatus:"مكتملة",cancelledStatus:"ملغاة",noShow:"لم يحضر",unassigned:"بدون فريق",visitsCount:"زيارة",recordsCount:"سجل",createdBy:"أنشأها",direct:"بريد مباشر",agentMatch:"مطابقة المندوب",dataQuality:"جودة بيانات المصدر"
+      visits:"زيارة",relationships:"العلاقات",meetings:"الاجتماعات",orientations:"Orientations",workshops:"Workshops",ads:"الإعلانات",addActivity:"إضافة نشاط",createRecord:"إنشاء سجل",activityType:"نوع النشاط",orientation:"Orientation",workshop:"Workshop",brokerType:"نوع الوسيط",newBroker:"وسيط جديد",existingBroker:"وسيط قائم",companyName:"اسم الشركة",searchCompanies:"ابحث عن شركة مسندة إليك",searchCompanyPlaceholder:"ابحث باسم الشركة",assignedCompany:"الشركة المسندة",eligibleBrokerHint:"يظهر فقط الوسطاء الذين سجلت معهم Orientation واحدة على الأقل.",searchEligible:"ابحث عن وسيط مؤهل",searchEligiblePlaceholder:"ابحث باسم الشركة",eligibleBroker:"الوسيط المؤهل",noEligibleBrokers:"لا يوجد وسطاء مؤهلون بعد. سجّل Orientation أولًا.",brokerAdmin:"مسؤول الوساطة",requestNumber:"رقم الطلب (اختياري)",cancel:"إلغاء",saveActivity:"حفظ النشاط",activityBreakdown:"توزيع الأنشطة",activityBreakdownSub:"الاجتماعات والزيارات والـ Orientations والـ Workshops والإعلانات خلال الفترة المحددة",activityTrend:"اتجاه الأنشطة",activityTrendSub:"كل الأنشطة المسجلة شهريًا خلال الفترة المحددة",withinSelectedPeriod:"خلال الفترة المحددة",welcome:"مرحبًا بعودتك",loginSubtitle:"سجّل الدخول لمتابعة أداء المبيعات والعلاقات بين البيانات.",email:"البريد الإلكتروني",password:"كلمة المرور",signIn:"تسجيل الدخول",workspace:"مساحة العمل",overview:"نظرة عامة",relationships:"العلاقات",visits:"الزيارات",signOut:"تسجيل الخروج",workspaceOverview:"نظرة عامة على مساحة العمل",dashboard:"لوحة التحكم",analyticsFor:"التحليلات خلال",allCompanies:"كل الشركات",last7:"آخر 7 أيام",last30:"آخر 30 يومًا",last90:"آخر 90 يومًا",last365:"آخر 12 شهرًا",allTime:"كل الوقت",visitTrend:"نشاط زياراتي",visitTrendSub:"عدد زياراتك خلال الفترة المحددة",visitStatus:"حالة زياراتي",visitStatusSub:"الزيارات المعلقة والمكتملة",teamPerformance:"مدة الزيارة",teamPerformanceSub:"المدة التي تستغرقها الزيارات المكتملة",visitDuration:"مدة الزيارة",visitDurationSub:"توزيع الزيارات المكتملة حسب المدة",myVisits:"زياراتي",myCompleted:"مكتملة",myPending:"معلقة",averageDuration:"متوسط المدة",topCompanies:"أكثر العملاء زيارة",topCompaniesSub:"عدد زياراتك لكل عميل",sourceTeams:"الفرق في Google Sheets",sourceTeamsSub:"العلاقات الحالية في بيانات المصدر",agentActivity:"نشاط مندوبي المبيعات",agentActivitySub:"سجلات المصدر حسب المندوب",dataExplorer:"مستكشف البيانات",relationshipMap:"مستكشف العلاقات",relationshipSub:"استكشف ارتباط المديرين والمندوبين والشركات والفرق والمجموعات.",from:"من",to:"مرتبط بـ",records:"السجلات",dataHealth:"جودة البيانات",dataHealthSub:"الحقول الناقصة في بيانات المصدر",recentVisits:"أحدث الزيارات",recentVisitsSub:"آخر الأنشطة في شركاتك",footer:"مساحة عمل ذكاء المبيعات",totalCompanies:"الشركات",members:"أعضاء الشركات",teams:"الفرق",totalVisits:"الزيارات خلال الفترة",completed:"الزيارات المكتملة",cancelled:"الزيارات الملغاة",sourceRecords:"سجلات المصدر",sourceCompanies:"شركات المصدر",sourceAgents:"مندوبو المبيعات",sourceManagers:"مديرو المبيعات",sourceTeamsKpi:"فرق المصدر",sourceGroups:"مجموعات العملاء",dropdownCompanies:"شركات القائمة",noData:"لا توجد بيانات لهذا الاختيار",loading:"جارٍ تحميل لوحة التحكم…",loginFailed:"تعذر تسجيل الدخول. راجع بيانات الحساب.",sessionExpired:"انتهت الجلسة. سجّل الدخول مرة أخرى.",networkError:"تعذر تحميل بيانات لوحة التحكم. حاول مرة أخرى.",directMatches:"مطابقة البريد مباشرة",agentMatches:"مطابقة اسم المندوب",missingEmail:"سجلات بدون بريد",missingAgent:"سجلات بدون مندوب",missingCompany:"سجلات بدون شركة",allRelationships:"كل العلاقات",managerToAgents:"المدير ← مندوبو المبيعات",managerToCompanies:"المدير ← الشركات",agentToCompanies:"المندوب ← الشركات",agentToEmails:"المندوب ← البريد الإلكتروني",emailToCompanies:"البريد الإلكتروني ← الشركات",companyToGroups:"الشركة ← مجموعات العملاء",companyToTeams:"الشركة ← فرق المصدر",teamToAgents:"الفريق ← مندوبو المبيعات",managerToTeams:"المدير ← الفرق",groupToTeams:"مجموعة العملاء ← الفرق",dropdownIdToCompany:"كود القائمة ← الشركة",dropdownAgentToCompany:"مندوب القائمة ← الشركة",companyToMembers:"الشركة ← الأعضاء",companyToTeamsDb:"الشركة ← فرق التطبيق",teamToMembersDb:"فريق التطبيق ← الأعضاء",teamToVisitsDb:"الفريق ← زيارات الشركة",visitToCreator:"الشركة ← منشئو الزيارات",visitToAssignees:"الشركة ← المسؤولون عن الزيارات",orientationCompanyToAgents:"شركات الزيارات ← المندوبون",orientationAgentToManagers:"مندوبو الزيارات ← المديرون",orientationCompanyToBrokerAdmins:"الشركة ← مسؤولوها",orientationTypeToBrokerType:"نوع النشاط ← نوع الوسيط",orientationLocationInToOut:"مواقع الدخول ← الخروج",orientationEmailToAgents:"البريد ← المندوبون",orientationProjectToCompany:"كود المشروع ← الشركة",orientationRequestToCompany:"الطلب ← الشركة",managerVisits:"الزيارات حسب المدير والفريق",managerVisitsSub:"كل المديرين والفرق والمندوبين والزيارات التابعة لهم",unassignedSales:"مندوبو المبيعات بدون مدير",noManagerFound:"لم يتم العثور على مدير مرتبط بهذا المندوب.",noAdminHierarchy:"لا تتوفر بيانات للمديرين أو هيكل المبيعات.",noRelationships:"لا توجد علاقات لهذا الاختيار.",sourceData:"Google Sheets",noRecentVisits:"لا توجد زيارات حديثة خلال هذه الفترة.",refresh:"تم تحديث لوحة التحكم",lastSync:"آخر مزامنة",notSynced:"وقت المزامنة غير متاح",unknown:"غير معروف",scheduled:"مجدولة",inProgress:"معلقة",completedStatus:"مكتملة",cancelledStatus:"ملغاة",noShow:"لم يحضر",unassigned:"بدون فريق",visitsCount:"زيارة",recordsCount:"سجل",createdBy:"أنشأها",direct:"بريد مباشر",agentMatch:"مطابقة المندوب",dataQuality:"جودة بيانات المصدر"
     }
   };
   const t = k => words[state.language][k] || words.en[k] || k;
@@ -21,15 +28,52 @@
     state.language=lang;localStorage.setItem("brokerflow_language",lang);
     document.documentElement.lang=lang;document.documentElement.dir=lang==="ar"?"rtl":"ltr";
     $("languageBtn").textContent=lang==="ar"?"English":"عربي";
-    document.querySelectorAll("[data-i18n]").forEach(el=>{const k=el.dataset.i18n;if(words[lang][k])el.textContent=words[lang][k];});
+    document.querySelectorAll("[data-i18n]").forEach(el=>{const k=el.dataset.i18n;if(words[lang][k])el.textContent=words[lang][k];});document.querySelectorAll("[data-i18n-placeholder]").forEach(el=>{const k=el.dataset.i18nPlaceholder;if(words[lang][k])el.placeholder=words[lang][k];});
     if(state.data){renderDashboard(state.data);populateRelations(state.data.relationships||{});renderRelations(state.data.relationships||{});}
   }
+  async function refreshSession(){
+    if(!state.refreshToken)throw new Error("Refresh session is missing");
+    if(!refreshPromise){
+      refreshPromise=(async()=>{
+        const response=await fetch("/api/auth/refresh",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({refreshToken:state.refreshToken})
+        });
+        const body=await response.json().catch(()=>({}));
+        if(!response.ok||!body.token||!body.refreshToken){
+          throw new Error(body.message||"Refresh session expired");
+        }
+        state.token=body.token;
+        state.refreshToken=body.refreshToken;
+        sessionStorage.setItem("brokerflow_token",state.token);
+        sessionStorage.setItem("brokerflow_refresh_token",state.refreshToken);
+        return body;
+      })().finally(()=>{refreshPromise=null;});
+    }
+    return refreshPromise;
+  }
   async function api(path,options){
-    options=options||{};const headers=Object.assign({"Content-Type":"application/json"},options.headers||{});
-    if(state.token)headers.Authorization="Bearer "+state.token;
-    const response=await fetch(path,Object.assign({},options,{headers}));
+    options=options||{};
+    const headers=Object.assign({"Content-Type":"application/json"},options.headers||{});
+    const execute=()=>fetch(path,Object.assign({},options,{
+      headers:Object.assign({},headers,state.token?{Authorization:"Bearer "+state.token}:{})
+    }));
+    let response=await execute();
+    if(response.status===401 && path!=="/api/auth/login" && path!=="/api/auth/refresh"){
+      try{
+        await refreshSession();
+        response=await execute();
+      }catch(error){
+        clearSession();
+        throw new Error(t("sessionExpired"));
+      }
+    }
     const body=await response.json().catch(()=>({}));
-    if(response.status===401){logout();throw new Error(t("sessionExpired"));}
+    if(response.status===401){
+      clearSession();
+      throw new Error(t("sessionExpired"));
+    }
     if(!response.ok)throw new Error(body.message||("Request failed ("+response.status+")"));
     return body;
   }
@@ -38,19 +82,40 @@
     if(state.user){$("userName").textContent=state.user.fullName||"User";$("userEmail").textContent=state.user.email||"";$("userAvatar").textContent=(state.user.fullName||"U").trim().charAt(0).toUpperCase();}
     setLanguage(state.language);
   }
-  function logout(){state.token="";state.user=null;state.data=null;sessionStorage.removeItem("brokerflow_token");$("appView").classList.add("hidden");$("loginView").classList.remove("hidden");}
+  function clearSession(){
+    state.token="";
+    state.refreshToken="";
+    state.user=null;
+    state.data=null;
+    sessionStorage.removeItem("brokerflow_token");
+    sessionStorage.removeItem("brokerflow_refresh_token");
+    $("appView").classList.add("hidden");
+    $("loginView").classList.remove("hidden");
+  }
+  async function logout(){
+    if(state.token && state.refreshToken){
+      try{
+        await refreshSession();
+        await fetch("/api/auth/logout",{
+          method:"POST",
+          headers:{Authorization:"Bearer "+state.token}
+        });
+      }catch(_){}
+    }
+    clearSession();
+  }
   async function login(event){
     event.preventDefault();const button=$("loginForm").querySelector("button");$("loginError").textContent="";button.disabled=true;button.textContent=t("loading");
-    try{const result=await api("/api/auth/login",{method:"POST",body:JSON.stringify({email:$("email").value.trim(),password:$("password").value})});state.token=result.token;state.user=result.user;sessionStorage.setItem("brokerflow_token",state.token);showApp(result.user);await loadDashboard();}
+    try{const result=await api("/api/auth/login",{method:"POST",body:JSON.stringify({email:$("email").value.trim(),password:$("password").value})});state.token=result.token;state.refreshToken=result.refreshToken;state.user=result.user;sessionStorage.setItem("brokerflow_token",state.token);sessionStorage.setItem("brokerflow_refresh_token",state.refreshToken);showApp(result.user);await loadDashboard();}
     catch(err){$("loginError").textContent=err.message||t("loginFailed");}
     finally{button.disabled=false;button.textContent=t("signIn");}
   }
   async function loadDashboard(showMessage){
     if(!state.token)return;$("refreshBtn").disabled=true;
     try{
-      const params=new URLSearchParams({period:$("periodFilter").value||"30d"});if($("companyFilter").value)params.set("companyId",$("companyFilter").value);
+      const params=new URLSearchParams({period:$("periodFilter").value||"30d"});
       const data=await api("/api/dashboard/overview?"+params.toString());state.data=data;state.user=data.user||state.user;showApp(state.user);
-      populateCompanies(data.companies||[]);renderDashboard(data);populateRelations(data.relationships||{});renderRelations(data.relationships||{});
+      renderDashboard(data);populateRelations(data.relationships||{});renderRelations(data.relationships||{});
       const orientationInfo=data.orientationSource||{};
       const sheetSync=data.lastGoogleSheetSyncAt?t("lastSync")+" "+date(data.lastGoogleSheetSyncAt):t("notSynced");
       const orientationStatus=orientationInfo.status==="connected"
@@ -62,41 +127,44 @@
     }catch(err){if(err.message!==t("sessionExpired"))toast(err.message||t("networkError"));}
     finally{$("refreshBtn").disabled=false;}
   }
-  function populateCompanies(companies){
-    const select=$("companyFilter"),current=select.value;
-    select.innerHTML='<option value="">'+esc(t("allCompanies"))+'</option>'+companies.map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join("");
-    if(Array.from(select.options).some(o=>o.value===current))select.value=current;
-  }
   function renderDashboard(data){
     const s=data.summary||{};
-    const isAdmin=data.user?.role==="ADMIN";
+    const isAdmin=data.user?.role==="OPERATION_DIRECTOR"||data.user?.role==="SALES_MANAGER";
+    const isSalesMan=data.user?.role==="SALES_MAN";
+    $("addActivityBtn").classList.toggle("hidden",!isSalesMan);
     const personal=data.personalSummary||{};
     const setPanelCopy=(id,title,subtitle)=>{const panel=$(id).closest(".panel");const heading=panel?.querySelector("h2");const description=panel?.querySelector("p");if(heading)heading.textContent=title;if(description)description.textContent=subtitle;};
     if(isAdmin){
-      setPanelCopy("visitTrend",state.language==="ar"?"نشاط الزيارات":"Visit activity",state.language==="ar"?"حجم الزيارات شهريًا خلال الفترة المحددة":"Monthly visit volume in the selected period");
+      setPanelCopy("visitTrend",t("activityTrend"),t("activityTrendSub"));
       setPanelCopy("statusChart",state.language==="ar"?"حالة الزيارات":"Visit status",state.language==="ar"?"توزيع الحالات خلال الفترة":"Current period breakdown");
       setPanelCopy("teamChart",state.language==="ar"?"أداء الفرق":"Team performance",state.language==="ar"?"الزيارات حسب الفريق":"Visits by team");
       setPanelCopy("companyChart",state.language==="ar"?"أكثر الشركات نشاطًا":"Top companies",state.language==="ar"?"الزيارات حسب الشركة":"Visits by company");
     }else{
-      setPanelCopy("visitTrend",t("visitTrend"),t("visitTrendSub"));
+      setPanelCopy("visitTrend",t("activityTrend"),t("activityTrendSub"));
       setPanelCopy("statusChart",t("visitStatus"),t("visitStatusSub"));
       setPanelCopy("teamChart",t("visitDuration"),t("visitDurationSub"));
       setPanelCopy("companyChart",t("topCompanies"),t("topCompaniesSub"));
     }
-    const cards=isAdmin
-      ? [["totalCompanies",s.companies,"▦",t("members")+": "+num(s.members)],["teams",s.teams,"⌘",t("sourceTeamsKpi")+": "+num(s.sourceTeams)],["totalVisits",s.visitsInPeriod,"◷",t("completed")+": "+num(s.completedVisits)],["sourceRecords",s.sourceRecords,"≋",t("sourceCompanies")+": "+num(s.sourceCompanies)]]
-      : [["myVisits",personal.total,"◷",t("topCompaniesSub")],["myCompleted",personal.completed,"✓",t("completed")+": "+num(personal.completionRate||0)+"%"],["myPending",personal.pending,"◌",t("inProgress")],["averageDuration",personal.averageDurationMinutes==null?"—":num(personal.averageDurationMinutes)+" "+(state.language==="ar"?"دقيقة":"min"),"◴",t("completed")+": "+num(personal.completed)]];
-    $("kpiGrid").innerHTML=cards.map(c=>'<article class="kpi-card"><div class="kpi-top"><span>'+esc(t(c[0]))+'</span><span class="kpi-icon">'+c[2]+'</span></div><div class="kpi-value">'+(typeof c[1]==="string"?esc(c[1]):num(c[1]))+'</div><div class="kpi-note">'+esc(c[3])+'</div></article>').join("");
+    const activities=data.activityMetrics||{};
+    const cards=[
+      ["meetings",Number(activities.meetings||0),"◷",t("withinSelectedPeriod")],
+      ["visits",Number(activities.visits||0),"⌖",t("withinSelectedPeriod")],
+      ["orientations",Number(activities.orientations||0),"▣",t("withinSelectedPeriod")],
+      ["workshops",Number(activities.workshops||0),"⌂",t("withinSelectedPeriod")],
+      ["ads",Number(activities.ads||0),"↗",t("withinSelectedPeriod")]
+    ];
+    $("kpiGrid").innerHTML=cards.map((card,index)=>'<article class="kpi-card'+(index===4?' kpi-wide':'')+'"><div class="kpi-top"><span>'+esc(t(card[0]))+'</span><span class="kpi-icon">'+card[2]+'</span></div><div class="kpi-value">'+num(card[1])+'</div><div class="kpi-note">'+esc(card[3])+'</div></article>').join("");
+    renderBars("activityBreakdown",cards.map(card=>({label:t(card[0]),value:card[1]})));
     const charts=data.charts||{};
     if(isAdmin){
-      renderLine("visitTrend",charts.orientationByMonth?.length?charts.orientationByMonth:(charts.visitsByMonth||[]));
+      renderLine("visitTrend",charts.activityByMonth?.length?charts.activityByMonth:(charts.visitsByMonth||[]));
       renderDonut("statusChart",charts.orientationByType?.length?charts.orientationByType:(charts.visitsByStatus||[]));
       renderBars("teamChart",charts.orientationByManager?.length?charts.orientationByManager:(charts.visitsByTeam||[]));
       renderBars("companyChart",charts.orientationByCompany?.length?charts.orientationByCompany:(charts.visitsByCompany||[]));
       renderBars("sourceTeamChart",charts.orientationByAgent?.length?charts.orientationByAgent:(charts.sourceByTeam||[]));
       renderBars("agentChart",charts.orientationByBrokerType?.length?charts.orientationByBrokerType:(charts.sourceByAgent||[]));
     }else{
-      renderLine("visitTrend",charts.personalVisitsTrend||[]);
+      renderLine("visitTrend",charts.activityByMonth?.length?charts.activityByMonth:(charts.personalVisitsTrend||[]));
       renderDonut("statusChart",charts.personalVisitsByStatus||[]);
       renderBars("teamChart",charts.personalDurationBuckets||[]);
       renderBars("companyChart",charts.personalVisitsByCompany||[]);
@@ -105,16 +173,23 @@
       $("relationships").classList.add("hidden");
       $("dataHealthPanel").classList.add("hidden");
     }
-    $("relationshipsNav").classList.toggle("hidden",!isAdmin);
-    $("syncText").closest(".sync-status").classList.toggle("hidden",!isAdmin);
-    if(isAdmin){
-      $("sourceTeamChart").closest("article").classList.remove("hidden");
-      $("agentChart").closest("article").classList.remove("hidden");
-      $("relationships").classList.remove("hidden");
-      $("dataHealthPanel").classList.remove("hidden");
-    }
+    $("relationshipsNav").classList.add("hidden");
+    $("relationships").classList.add("hidden");
+    $("syncText").closest(".sync-status").classList.add("hidden");
+    $("dataHealthPanel").classList.add("hidden");
+    $("sourceTeamChart").closest("article").classList.add("hidden");
+    $("agentChart").closest("article").classList.add("hidden");
     renderHealth(data);
-    renderVisits(isAdmin?(data.recentVisits||data.orientationVisits||[]):(data.personalRecentVisits||[]));
+    const recentBase=isAdmin?(data.recentVisits||data.orientationVisits||[]):(data.personalRecentVisits||[]);
+    const savedActivities=(data.appActivities||[]).map(activity=>({
+      ...activity,
+      date:activity.createdAt,
+      type:activity.activityType||activity.type||"Orientation",
+      scheduledAt:activity.createdAt
+    }));
+    renderVisits([...recentBase,...savedActivities]
+      .sort((a,b)=>new Date(b.scheduledAt||b.createdAt||b.date||0)-new Date(a.scheduledAt||a.createdAt||a.date||0))
+      .slice(0,12));
     renderAdminHierarchy(data.managerHierarchy,isAdmin);
   }
   function renderAdminHierarchy(hierarchy, isAdmin){
@@ -214,16 +289,22 @@
         ...(v.recordType==="APP_VISIT" ? [
           [label("Client","العميل"),v.clientName],
           [label("Client phone","هاتف العميل"),v.clientPhone],
-          [label("Property","العقار"),v.propertyName],
-          [label("Address","العنوان"),v.propertyAddress],
-          [label("Team","الفريق"),v.teamName],
+          [label("Client source","مصدر العميل"),v.source],
+          [label("Source type","نوع المصدر"),v.clientSourceType],
+          [label("Source name","اسم المصدر"),v.clientSourceName],
+          [label("Source phone","هاتف المصدر"),v.clientSourcePhone],
+          [label("Source details","تفاصيل المصدر"),v.clientSourceDetails],
           [label("Status","الحالة"),statusLabel(v.status)],
           [label("Started at","وقت البداية"),v.startedAt?date(v.startedAt):""],
           [label("Ended at","وقت النهاية"),v.endedAt?date(v.endedAt):""],
           [label("Start GPS","موقع البداية"),v.startLatitude!=null&&v.startLongitude!=null?(v.startLatitude+", "+v.startLongitude):""],
           [label("End GPS","موقع النهاية"),v.endLatitude!=null&&v.endLongitude!=null?(v.endLatitude+", "+v.endLongitude):""],
           [label("Notes","ملاحظات"),v.notes],
-          [label("Created by","أنشأها"),v.createdBy]
+          [label("Sales Man","مندوب المبيعات"),v.createdBy||v.salesAgent]
+        ] : []),
+        ...(v.recordType==="AD" ? [
+          [label("Ad link","رابط الإعلان"),v.link],
+          [label("Sales Man","مندوب المبيعات"),v.salesAgent]
         ] : []),
         [label("Time in","وقت الدخول"),v.timeIn],
         [label("Time out","وقت الخروج"),v.timeOut],
@@ -240,13 +321,93 @@
         [label("Duplicate","مكرر؟"),v.isDuplicate]
       ].filter(x=>x[1]!==null&&x[1]!==undefined&&String(x[1]).trim()!=="");
       const meta = v.recordType==="APP_VISIT"
-        ? (v.propertyName||v.clientName||label("Property visit","زيارة عقارية"))
-        : ((v.timeIn||"—")+" · "+(v.salesAgent||v.createdBy||"—"));
+        ? (v.clientName||label("Client visit","زيارة عميل"))
+        : v.recordType==="AD"
+          ? (v.salesAgent||v.createdBy||"")
+          : ((v.timeIn||"—")+" · "+(v.salesAgent||v.createdBy||"—"));
       const isCurrent = v.recordType==="APP_VISIT" && v.status==="IN_PROGRESS";
-      const kind = v.recordType==="APP_VISIT" ? statusLabel(v.status) : (v.type||"Orientation");
+      const kind = v.recordType==="APP_VISIT" ? statusLabel(v.status) : v.recordType==="AD" ? t("ads") : (v.activityType||v.type||"Orientation");
+      const completeAction = v.recordType==="ORIENTATION" && v.status==="IN_PROGRESS"
+        ? '<button type="button" class="primary-btn" data-complete-activity="'+esc(v.id)+'">'+esc(label("Mark completed","إنهاء النشاط"))+'</button>'
+        : "";
       const currentLabel = isCurrent ? '<small class="current-visit-label">'+esc(label("CURRENT VISIT","الزيارة الحالية"))+'</small>' : '';
-      return '<div class="recent-item orientation-record'+(isCurrent?' pending-current':'')+'"><div>'+currentLabel+'<strong>'+esc(v.companyName||v.newCompanyName||t("unknown"))+'</strong><small>'+esc(v.date||date(v.scheduledAt))+' · '+esc(meta)+'</small><div class="orientation-details">'+rows.map(x=>'<span><b>'+esc(x[0])+':</b> '+esc(x[1])+'</span>').join("")+'</div></div><span class="status-pill '+(isCurrent?'pending':'')+'">'+esc(kind)+'</span></div>';
+      return '<div class="recent-item orientation-record'+(isCurrent?' pending-current':'')+'"><div>'+currentLabel+'<strong>'+esc(v.clientName||v.companyName||v.link||t("unknown"))+'</strong><small>'+esc(v.date||date(v.scheduledAt||v.startedAt))+' · '+esc(meta)+'</small><div class="orientation-details">'+rows.map(x=>'<span><b>'+esc(x[0])+':</b> '+esc(x[1])+'</span>').join("")+'</div>'+completeAction+'</div><span class="status-pill '+(isCurrent?'pending':'')+'">'+esc(kind)+'</span></div>';
     }).join("");
+  }
+
+  let activityOptionsCache=null;
+  function fillActivitySelect(select,items,valueKey,labelKey){
+    const emptyOption=document.createElement("option");
+    emptyOption.value="";
+    emptyOption.textContent=state.language==="ar"?"اختر":"Select";
+    select.innerHTML="";
+    select.appendChild(emptyOption);
+    items.forEach(item=>{
+      const option=document.createElement("option");
+      option.value=item[valueKey];
+      option.textContent=labelKey?item[labelKey]:item[valueKey];
+      select.appendChild(option);
+    });
+  }
+  function applyActivityMode(){
+    const isOrientation=$("activityType").value==="ORIENTATION";
+    $("newCompanyGroup").classList.toggle("hidden",!isOrientation);
+    $("eligibleBrokerGroup").classList.toggle("hidden",isOrientation);
+    $("newCompanyName").required=isOrientation;
+    $("eligibleBroker").required=!isOrientation;
+    renderActivityCompanyOptions();
+    updateActivitySubmitState();
+  }
+  function updateActivitySubmitState(){
+    if(!activityOptionsCache){$("saveActivityBtn").disabled=true;return;}
+    const isOrientation=$("activityType").value==="ORIENTATION";
+    const companyName=isOrientation ? $("newCompanyName").value.trim() : $("eligibleBroker").value;
+    $("saveActivityBtn").disabled=!companyName||!$("brokerAdmin").value.trim();
+  }
+  function renderActivityCompanyOptions(){
+    if(!activityOptionsCache)return;
+    const eligibleQuery=$("eligibleSearch").value.trim().toLowerCase();
+    const eligible=(activityOptionsCache.eligibleBrokers||[]).filter(item=>String(item.companyName).toLowerCase().includes(eligibleQuery));
+    fillActivitySelect($("eligibleBroker"),eligible,"companyName");
+    $("eligibleEmpty").textContent=t("noEligibleBrokers");
+    $("eligibleEmpty").classList.toggle("hidden",eligible.length>0);
+    updateActivitySubmitState();
+  }
+  async function loadActivityOptions(){
+    $("activityFormError").textContent="";
+    $("saveActivityBtn").disabled=true;
+    try{activityOptionsCache=await api("/api/activities/options");applyActivityMode();updateActivitySubmitState();}
+    catch(error){$("activityFormError").textContent=error.message||t("networkError");}
+  }
+  async function openActivityDialog(){
+    $("activityForm").reset();
+    $("activityType").value="ORIENTATION";
+    $("activityFormError").textContent="";
+    activityOptionsCache=null;
+    applyActivityMode();
+    $("activityDialog").showModal();
+    await loadActivityOptions();
+  }
+  function closeActivityDialog(){if($("activityDialog").open)$("activityDialog").close();}
+  async function saveActivity(event){
+    event.preventDefault();
+    $("activityFormError").textContent="";
+    if(!$("activityForm").reportValidity())return;
+    const activityType=$("activityType").value;
+    const companyName=activityType==="WORKSHOP"?$("eligibleBroker").value:$("newCompanyName").value.trim();
+    if(!companyName){$("activityFormError").textContent=activityType==="WORKSHOP"?t("noEligibleBrokers"):t("companyName");return;}
+    const body={activityType,companyName,brokerAdmin:$("brokerAdmin").value.trim()};
+    const button=$("saveActivityBtn");
+    button.disabled=true;
+    button.textContent=state.language==="ar"?"جارٍ الحفظ…":"Saving…";
+    $("cancelActivityBtn").disabled=true;$("closeActivityBtn").disabled=true;
+    try{
+      await api("/api/activities",{method:"POST",body:JSON.stringify(body)});
+      closeActivityDialog();
+      toast(state.language==="ar"?"بدأ النشاط. أنهِه من قائمة الأنشطة عند الانتهاء.":"Activity started. Complete it from the activity list when finished.");
+      await loadDashboard();
+    }catch(error){$("activityFormError").textContent=error.message||t("networkError");}
+    finally{button.textContent=t("saveActivity");updateActivitySubmitState();$("cancelActivityBtn").disabled=false;$("closeActivityBtn").disabled=false;}
   }
   function populateRelations(relations){
     const select=$("relationshipFilter"),current=select.value;
@@ -260,7 +421,31 @@
     $("relationshipRows").innerHTML=rows.length?rows.slice(0,250).map(x=>'<tr><td>'+esc(x.from)+'</td><td>'+esc(x.to)+'</td><td>'+num(x.count)+'</td></tr>').join(""):'<tr><td colspan="3">'+esc(t("noRelationships"))+'</td></tr>';
   }
   function statusLabel(v){return ({SCHEDULED:t("scheduled"),IN_PROGRESS:t("inProgress"),COMPLETED:t("completedStatus"),CANCELLED:t("cancelledStatus"),NO_SHOW:t("noShow")})[v]||v||t("unknown");}
-  $("loginForm").addEventListener("submit",login);$("logoutBtn").addEventListener("click",logout);$("refreshBtn").addEventListener("click",()=>loadDashboard(true));$("periodFilter").addEventListener("change",()=>loadDashboard());$("companyFilter").addEventListener("change",()=>loadDashboard());$("relationshipFilter").addEventListener("change",()=>renderRelations(state.data?.relationships||{}));$("languageBtn").addEventListener("click",()=>setLanguage(state.language==="en"?"ar":"en"));
+  $("recentVisits").addEventListener("click",async event=>{
+    const button=event.target.closest("[data-complete-activity]");
+    if(!button)return;
+    const id=button.dataset.completeActivity;
+    button.disabled=true;
+    try{
+      await api("/api/activities/"+encodeURIComponent(id)+"/complete",{method:"PATCH"});
+      toast(state.language==="ar"?"تم إنهاء النشاط":"Activity completed");
+      await loadDashboard();
+    }catch(error){
+      button.disabled=false;
+      toast(error.message||t("networkError"));
+    }
+  });
+  $("addActivityBtn").addEventListener("click",openActivityDialog);
+  $("closeActivityBtn").addEventListener("click",closeActivityDialog);
+  $("cancelActivityBtn").addEventListener("click",closeActivityDialog);
+  $("activityForm").addEventListener("submit",saveActivity);
+  $("activityType").addEventListener("change",applyActivityMode);
+  ["newCompanyName","eligibleBroker","brokerAdmin"].forEach(id=>{
+    $(id).addEventListener("input",updateActivitySubmitState);
+    $(id).addEventListener("change",updateActivitySubmitState);
+  });
+  $("eligibleSearch").addEventListener("input",renderActivityCompanyOptions);
+  $("loginForm").addEventListener("submit",login);$("logoutBtn").addEventListener("click",logout);$("refreshBtn").addEventListener("click",()=>loadDashboard(true));$("periodFilter").addEventListener("change",()=>loadDashboard());$("relationshipFilter").addEventListener("change",()=>renderRelations(state.data?.relationships||{}));$("languageBtn").addEventListener("click",()=>setLanguage(state.language==="en"?"ar":"en"));
   setLanguage(state.language);
   if(state.token){showApp(state.user);api("/api/auth/me").then(result=>{state.user=result.user;showApp(result.user);return loadDashboard();}).catch(()=>logout());}
 })();

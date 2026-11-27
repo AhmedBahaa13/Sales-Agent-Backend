@@ -10,7 +10,7 @@ function getConnectionOptions() {
     if (!process.env.DB_CA) throw new Error("DB_CA is missing");
 
     const url = new URL(process.env.DATABASE_URL);
-    const ca = process.env.DB_CA.replace(/\\n/g, "\n");
+    const ca = process.env.DB_CA.replace(/\\\\n/g, "\n");
     if (!ca.includes("-----BEGIN CERTIFICATE-----") || !ca.includes("-----END CERTIFICATE-----")) {
         throw new Error("DB_CA is invalid");
     }
@@ -27,11 +27,6 @@ function getConnectionOptions() {
     };
 }
 
-/**
- * MySQL doesn't support ALTER TABLE ... ADD COLUMN IF NOT EXISTS.
- * Check INFORMATION_SCHEMA first so migrations are safe even when a previous
- * application version already added some lifecycle columns.
- */
 async function executeMigrationStatement(connection, statement) {
     const normalized = statement.trim();
     if (!normalized) return;
@@ -39,17 +34,44 @@ async function executeMigrationStatement(connection, statement) {
     const addColumn = normalized.match(
         /^ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s+ADD\s+COLUMN\s+`?([A-Za-z0-9_]+)`?\s+([\s\S]+)$/i
     );
-
     if (addColumn) {
         const [, tableName, columnName] = addColumn;
-        const existing = await connection.query(
-            "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS " +
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1",
+        const rows = await connection.query(
+            "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1",
             [tableName, columnName]
         );
-
-        if (existing.length > 0) {
+        if (rows.length) {
             console.log("Migration skipped existing column: " + tableName + "." + columnName);
+            return;
+        }
+    }
+
+    const addConstraint = normalized.match(
+        /^ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s+ADD\s+CONSTRAINT\s+`?([A-Za-z0-9_]+)`?/i
+    );
+    if (addConstraint) {
+        const [, tableName, constraintName] = addConstraint;
+        const rows = await connection.query(
+            "SELECT 1 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? LIMIT 1",
+            [tableName, constraintName]
+        );
+        if (rows.length) {
+            console.log("Migration skipped existing constraint: " + constraintName);
+            return;
+        }
+    }
+
+    const createIndex = normalized.match(
+        /^CREATE\s+(?:UNIQUE\s+)?INDEX\s+`?([A-Za-z0-9_]+)`?\s+ON\s+`?([A-Za-z0-9_]+)`?/i
+    );
+    if (createIndex) {
+        const [, indexName, tableName] = createIndex;
+        const rows = await connection.query(
+            "SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1",
+            [tableName, indexName]
+        );
+        if (rows.length) {
+            console.log("Migration skipped existing index: " + indexName);
             return;
         }
     }
@@ -68,9 +90,7 @@ async function run() {
             [migrationLockName]
         );
         migrationLockAcquired = Number(lockResult[0]?.acquired) === 1;
-        if (!migrationLockAcquired) {
-            throw new Error("Could not acquire the database migration lock");
-        }
+        if (!migrationLockAcquired) throw new Error("Could not acquire the database migration lock");
 
         await connection.query(
             "CREATE TABLE IF NOT EXISTS `brokerflow_migrations` (" +
@@ -79,16 +99,13 @@ async function run() {
             ") ENGINE=InnoDB"
         );
 
-        const files = fs.readdirSync(MIGRATIONS_DIR)
-            .filter(file => file.endsWith(".sql"))
-            .sort();
-
+        const files = fs.readdirSync(MIGRATIONS_DIR).filter(file => file.endsWith(".sql")).sort();
         for (const file of files) {
             const alreadyApplied = await connection.query(
                 "SELECT `id` FROM `brokerflow_migrations` WHERE `id` = ? LIMIT 1",
                 [file]
             );
-            if (alreadyApplied.length > 0) continue;
+            if (alreadyApplied.length) continue;
 
             const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
             const statements = sql

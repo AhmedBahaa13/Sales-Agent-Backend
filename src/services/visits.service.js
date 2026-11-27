@@ -1,18 +1,5 @@
-const { isAdminEmail } = require("../utils/admin-access");
-const { matchesAccountEmail, parseCoordinate } = require("../utils/access-policy");
-
-const TEAM_FIELDS = ["team", "team1", "team2", "team3", "team4", "team5"];
-const clean = value => value == null || !String(value).trim() ? null : String(value).trim();
-const normalize = value => String(value || "").trim().toLocaleLowerCase();
-
-function uniqueNames(values) {
-    const map = new Map();
-    values.forEach(value => {
-        const name = clean(value);
-        if (name && !map.has(normalize(name))) map.set(normalize(name), name);
-    });
-    return [...map.values()].sort((a, b) => a.localeCompare(b));
-}
+const clean = value => value == null ? null : String(value).trim() || null;
+const normalize = value => String(value || "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 
 function httpError(status, message) {
     const error = new Error(message);
@@ -20,279 +7,249 @@ function httpError(status, message) {
     return error;
 }
 
-async function getVisitAccess(prisma, userId) {
-    const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { id: true, fullName: true, email: true, isActive: true }
-    });
-    if (!user || !user.isActive) throw httpError(401, "User not found or inactive");
-
-    const isAdmin = isAdminEmail(user.email);
-    const email = normalize(user.email);
-    const [dropdownRows, sourceRows, memberships, dbCompanies] = await Promise.all([
-        prisma.companyDropdown.findMany({
-            where: isAdmin ? {} : { email },
-            select: { companyName: true, salesAgent: true, email: true }
-        }),
-        prisma.googleSheetRecord.findMany({
-            where: isAdmin ? {} : { email },
-            select: {
-                companyName: true, salesAgent: true, email: true,
-                team: true, team1: true, team2: true, team3: true, team4: true, team5: true
-            }
-        }),
-        prisma.companyMember.findMany({
-            where: { userId, company: { isActive: true } },
-            select: { company: { select: { name: true } } }
-        }),
-        isAdmin
-            ? prisma.company.findMany({ where: { isActive: true }, select: { name: true } })
-            : Promise.resolve([])
-    ]);
-
-    // Display names are not identity proof. Email-less source rows require a separately approved mapping.
-    const allowed = row => matchesAccountEmail(row, email);
-    const dropdown = isAdmin ? dropdownRows : dropdownRows.filter(allowed);
-    const source = isAdmin ? sourceRows : sourceRows.filter(allowed);
-    const companies = uniqueNames([
-        ...dropdown.map(row => row.companyName),
-        ...source.map(row => row.companyName),
-        ...memberships.map(row => row.company.name),
-        ...dbCompanies.map(row => row.name)
-    ]);
-
-    const teams = new Map();
-    source.forEach(row => {
-        const companyName = clean(row.companyName);
-        if (!companyName) return;
-        TEAM_FIELDS.forEach(field => {
-            const name = clean(row[field]);
-            if (name) teams.set(normalize(companyName) + "|" + normalize(name), { companyName, name });
-        });
-    });
-
-    return { user, isAdmin, companies, teams: [...teams.values()] };
+function parseCoordinate(value, min, max, fieldName) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+        throw httpError(400, fieldName + " is invalid");
+    }
+    return parsed;
 }
 
-async function getActiveVisit(prisma, userId) {
+async function getActiveVisit(prisma, salesId) {
     const visit = await prisma.visit.findFirst({
-        where: {
-            status: "IN_PROGRESS",
-            OR: [
-                { createdById: userId },
-                { assignments: { some: { userId } } }
-            ]
-        },
+        where: { salesId, status: "IN_PROGRESS" },
         orderBy: { startedAt: "desc" },
         select: {
             id: true,
-            clientName: true,
-            propertyName: true,
-            company: { select: { name: true } },
-            startedAt: true
+            source: true,
+            startedAt: true,
+            client: { select: { id: true, name: true, phone: true } },
+            clientSource: { select: { id: true, sourceType: true, name: true } }
         }
     });
 
     return visit ? {
         id: visit.id,
-        clientName: visit.clientName,
-        propertyName: visit.propertyName,
-        companyName: visit.company.name,
+        clientId: visit.client.id,
+        clientName: visit.client.name,
+        clientPhone: visit.client.phone,
+        source: visit.source,
+        clientSource: visit.clientSource,
         startedAt: visit.startedAt
     } : null;
 }
 
 async function getVisitOptions(prisma, userId) {
-    const [access, activeVisit] = await Promise.all([
-        getVisitAccess(prisma, userId),
-        getActiveVisit(prisma, userId)
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, fullName: true, role: true, isActive: true }
+    });
+    if (!user || !user.isActive) throw httpError(401, "User account is unavailable");
+
+    const [activeVisit, clientSources] = await Promise.all([
+        user.role === "SALES_MAN" ? getActiveVisit(prisma, userId) : Promise.resolve(null),
+        user.role === "SALES_MAN"
+            ? prisma.clientSource.findMany({
+                where: { createdById: userId },
+                select: {
+                    id: true,
+                    sourceType: true,
+                    name: true,
+                    phone: true,
+                    details: true
+                },
+                orderBy: { createdAt: "desc" }
+            })
+            : Promise.resolve([])
     ]);
+
     return {
-        companies: access.companies.map(name => ({ name })),
-        teams: access.teams,
-        activeVisit
+        activeVisit,
+        clientSources,
+        canCreateVisit: user.role === "SALES_MAN"
+    };
+}
+
+function normalizeVisitInput(input = {}) {
+    const clientName = clean(input.clientName);
+    const clientPhone = clean(input.clientPhone);
+    const clientEmail = clean(input.clientEmail);
+    const source = String(input.source || "").trim().toUpperCase();
+    const clientSourceId = clean(input.clientSourceId);
+    const sourceType = clean(input.sourceDetails?.sourceType);
+    const sourceName = clean(input.sourceDetails?.name);
+    const sourcePhone = clean(input.sourceDetails?.phone);
+    const sourceDetails = clean(input.sourceDetails?.details);
+    const notes = clean(input.notes);
+
+    if (!clientName || clientName.length > 150) {
+        throw httpError(400, "Client name is required and must not exceed 150 characters");
+    }
+    if (clientPhone && clientPhone.length > 40) {
+        throw httpError(400, "Client phone must not exceed 40 characters");
+    }
+    if (clientEmail && (clientEmail.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail))) {
+        throw httpError(400, "Client email is invalid");
+    }
+    if (!["DIRECT", "INDIRECT"].includes(source)) {
+        throw httpError(400, "Visit source must be DIRECT or INDIRECT");
+    }
+
+    if (source === "DIRECT") {
+        if (clientSourceId) throw httpError(400, "Direct visits must submit new source details, not a source ID");
+        if (!sourceType || sourceType.length > 80 || !sourceName || sourceName.length > 150) {
+            throw httpError(400, "Direct visits require source type and source name");
+        }
+        if (sourcePhone && sourcePhone.length > 40) {
+            throw httpError(400, "Source phone must not exceed 40 characters");
+        }
+    } else if (!clientSourceId) {
+        throw httpError(400, "Indirect visits require a saved client source");
+    } else if (sourceDetails && (sourceType || sourceName || sourcePhone)) {
+        throw httpError(400, "Select a saved source for indirect visits");
+    }
+
+    return {
+        clientName, clientPhone, clientEmail, source, clientSourceId,
+        sourceDetails: source === "DIRECT" ? { sourceType, name: sourceName, phone: sourcePhone, details: sourceDetails } : null,
+        notes
     };
 }
 
 async function startVisit(prisma, userId, input) {
-    const companyName = clean(input.companyName);
-    const teamName = clean(input.teamName);
-    const clientName = clean(input.clientName);
-    const clientPhone = clean(input.clientPhone);
-    const propertyName = clean(input.propertyName);
-    const propertyAddress = clean(input.propertyAddress);
-    const notes = clean(input.notes);
-    const startLatitude = parseCoordinate(input.startLatitude ?? input.latitude, -90, 90);
-    const startLongitude = parseCoordinate(input.startLongitude ?? input.longitude, -180, 180);
+    const normalized = normalizeVisitInput(input);
+    const startLatitude = parseCoordinate(input.startLatitude, -90, 90, "Start latitude");
+    const startLongitude = parseCoordinate(input.startLongitude, -180, 180, "Start longitude");
 
-    if (!companyName || !clientName || !propertyAddress) {
-        throw httpError(400, "Company, client name and property address are required");
-    }
-    if (startLatitude === null || startLongitude === null) {
-        throw httpError(400, "Current visit start location is required");
-    }
-    if (
-        clientName.length > 150 ||
-        propertyAddress.length > 500 ||
-        (clientPhone && clientPhone.length > 40) ||
-        (propertyName && propertyName.length > 180)
-    ) {
-        throw httpError(400, "One or more fields exceed the allowed length");
-    }
-
-    const access = await getVisitAccess(prisma, userId);
-    if (!access.companies.some(name => normalize(name) === normalize(companyName))) {
-        throw httpError(403, "You are not allowed to create visits for this company");
-    }
-    if (teamName && !access.teams.some(team =>
-        normalize(team.companyName) === normalize(companyName) &&
-        normalize(team.name) === normalize(teamName)
-    )) {
-        throw httpError(403, "The selected team is not assigned to this company");
-    }
-
-    const startedAt = new Date();
-    const scheduledAt = startedAt;
-    const visit = await prisma.$transaction(async tx => {
-        // The InnoDB user-row lock remains held until commit, serializing concurrent starts.
+    return prisma.$transaction(async tx => {
         const lockedUser = await tx.$queryRawUnsafe(
-            "SELECT `id` FROM `User` WHERE `id` = ? FOR UPDATE",
+            "SELECT \`id\`, \`role\`, \`isActive\` FROM \`User\` WHERE \`id\` = ? FOR UPDATE",
             userId
         );
-        if (!lockedUser.length) throw httpError(401, "User not found");
+        const user = lockedUser[0];
+        if (!user || !user.isActive) throw httpError(401, "User account is unavailable");
+        if (user.role !== "SALES_MAN") throw httpError(403, "Only Sales Men can create visits");
 
         const activeVisit = await tx.visit.findFirst({
-            where: {
-                status: "IN_PROGRESS",
-                OR: [
-                    { createdById: userId },
-                    { assignments: { some: { userId } } }
-                ]
-            },
+            where: { salesId: userId, status: "IN_PROGRESS" },
             select: { id: true }
         });
         if (activeVisit) {
-            throw httpError(409, "You already have a pending visit. Finish it before starting another one.");
+            throw httpError(409, "You already have an active visit. Complete it before starting another one.");
         }
 
-        let company = await tx.company.findFirst({
-            where: { name: companyName, isActive: true },
-            select: { id: true, name: true }
-        });
-        if (!company) {
-            company = await tx.company.create({
-                data: { name: companyName },
-                select: { id: true, name: true }
+        let client = normalized.clientPhone
+            ? await tx.client.findFirst({
+                where: { createdById: userId, phone: normalized.clientPhone },
+                select: { id: true }
+            })
+            : null;
+
+        if (client) {
+            client = await tx.client.update({
+                where: { id: client.id },
+                data: {
+                    name: normalized.clientName,
+                    email: normalized.clientEmail
+                },
+                select: { id: true }
+            });
+        } else {
+            client = await tx.client.create({
+                data: {
+                    name: normalized.clientName,
+                    phone: normalized.clientPhone,
+                    email: normalized.clientEmail,
+                    createdById: userId
+                },
+                select: { id: true }
             });
         }
 
-        await tx.companyMember.upsert({
-            where: { companyId_userId: { companyId: company.id, userId } },
-            update: {},
-            create: { companyId: company.id, userId, role: access.isAdmin ? "ADMIN" : "AGENT" }
-        });
-
-        let team = null;
-        if (teamName) {
-            team = await tx.team.upsert({
-                where: { companyId_name: { companyId: company.id, name: teamName } },
-                update: {},
-                create: { companyId: company.id, name: teamName },
-                select: { id: true, name: true }
+        let clientSource;
+        if (normalized.source === "DIRECT") {
+            clientSource = await tx.clientSource.create({
+                data: {
+                    createdById: userId,
+                    sourceType: normalized.sourceDetails.sourceType,
+                    name: normalized.sourceDetails.name,
+                    phone: normalized.sourceDetails.phone,
+                    details: normalized.sourceDetails.details
+                },
+                select: { id: true, sourceType: true, name: true, phone: true, details: true }
             });
-            await tx.teamMember.upsert({
-                where: { teamId_userId: { teamId: team.id, userId } },
-                update: {},
-                create: { teamId: team.id, userId, role: "MEMBER" }
+        } else {
+            clientSource = await tx.clientSource.findFirst({
+                where: {
+                    id: normalized.clientSourceId,
+                    createdById: userId
+                },
+                select: { id: true, sourceType: true, name: true, phone: true, details: true }
             });
+            if (!clientSource) throw httpError(403, "The selected client source is not available for your account");
         }
 
-        return tx.visit.create({
+        const startedAt = new Date();
+        const visit = await tx.visit.create({
             data: {
-                companyId: company.id,
-                teamId: team ? team.id : null,
-                createdById: userId,
-                clientName,
-                clientPhone,
-                propertyName,
-                propertyAddress,
-                latitude: startLatitude,
-                longitude: startLongitude,
+                salesId: userId,
+                clientId: client.id,
+                source: normalized.source,
+                clientSourceId: clientSource.id,
+                startedAt,
                 startLatitude,
                 startLongitude,
-                startedAt,
-                scheduledAt,
                 status: "IN_PROGRESS",
-                notes,
-                assignments: { create: { userId } }
+                notes: normalized.notes
             },
             include: {
-                company: { select: { id: true, name: true } },
-                team: { select: { id: true, name: true } },
-                createdBy: { select: { id: true, fullName: true, email: true } },
-                assignments: {
-                    include: { user: { select: { id: true, fullName: true, email: true } } }
-                }
+                client: { select: { id: true, name: true, phone: true, email: true } },
+                clientSource: { select: { id: true, sourceType: true, name: true, phone: true, details: true } },
+                sales: { select: { id: true, fullName: true } }
             }
         });
-    }, { maxWait: 10000, timeout: 20000 });
 
-    return { visit, startedAt, startLatitude, startLongitude };
+        return visit;
+    }, { maxWait: 10000, timeout: 20000 });
 }
 
 async function completeVisit(prisma, userId, visitId, input) {
-    const endLatitude = parseCoordinate(input.endLatitude, -90, 90);
-    const endLongitude = parseCoordinate(input.endLongitude, -180, 180);
-    if (endLatitude === null || endLongitude === null) {
-        throw httpError(400, "Current visit end location is required");
-    }
-
+    const endLatitude = parseCoordinate(input.endLatitude, -90, 90, "End latitude");
+    const endLongitude = parseCoordinate(input.endLongitude, -180, 180, "End longitude");
     const endedAt = new Date();
+
     return prisma.$transaction(async tx => {
-        await tx.$queryRawUnsafe(
-            "SELECT `id` FROM `User` WHERE `id` = ? FOR UPDATE",
+        const lockedUser = await tx.$queryRawUnsafe(
+            "SELECT \`id\`, \`role\`, \`isActive\` FROM \`User\` WHERE \`id\` = ? FOR UPDATE",
             userId
         );
+        const user = lockedUser[0];
+        if (!user || !user.isActive) throw httpError(401, "User account is unavailable");
+        if (user.role !== "SALES_MAN") throw httpError(403, "Only Sales Men can complete visits");
+
         const current = await tx.visit.findUnique({
             where: { id: visitId },
-            select: {
-                id: true,
-                status: true,
-                createdById: true,
-                scheduledAt: true,
-                startedAt: true,
-                assignments: { select: { userId: true } }
-            }
+            select: { id: true, status: true, salesId: true, startedAt: true }
         });
         if (!current) throw httpError(404, "Visit not found");
+        if (current.salesId !== userId) throw httpError(403, "You can only complete your own visits");
+        if (current.status !== "IN_PROGRESS") throw httpError(409, "Only active visits can be completed");
 
-        const isAssigned = current.assignments.some(item => item.userId === userId);
-        if (current.createdById !== userId && !isAssigned) {
-            throw httpError(403, "You are not allowed to complete this visit");
-        }
-        if (current.status !== "IN_PROGRESS") {
-            throw httpError(409, "Only pending visits can be completed");
-        }
-
-        const startedAt = current.startedAt || current.scheduledAt;
         const changed = await tx.visit.updateMany({
-            where: { id: visitId, status: "IN_PROGRESS" },
+            where: { id: visitId, salesId: userId, status: "IN_PROGRESS" },
             data: {
-                startedAt,
                 endedAt,
                 endLatitude,
                 endLongitude,
                 status: "COMPLETED"
             }
         });
-        if (changed.count !== 1) {
-            throw httpError(409, "This visit has already been completed");
-        }
+        if (changed.count !== 1) throw httpError(409, "This visit has already been completed");
 
         return {
             id: current.id,
             status: "COMPLETED",
-            startedAt,
+            startedAt: current.startedAt,
             endedAt,
             endLatitude,
             endLongitude
@@ -301,9 +258,9 @@ async function completeVisit(prisma, userId, visitId, input) {
 }
 
 module.exports = {
-    getVisitAccess,
-    getVisitOptions,
     getActiveVisit,
+    getVisitOptions,
+    normalizeVisitInput,
     startVisit,
     completeVisit
 };

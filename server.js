@@ -2,12 +2,14 @@
 require("dotenv").config();
 const path = require("path");
 const express = require("express");
-const myDataRoutes = require("./src/routes/my-data.routes");
 const authRoutes = require("./src/routes/auth.routes");
 const companyRoutes = require("./src/routes/company.routes");
-const sheetsSyncRoutes = require("./src/routes/sheets-sync.routes");
 const dashboardRoutes = require("./src/routes/dashboard.routes");
 const visitRoutes = require("./src/routes/visits.routes");
+const brokerActivityRoutes = require("./src/routes/broker-activities.routes");
+const teamRoutes = require("./src/routes/teams.routes");
+const userRoutes = require("./src/routes/users.routes");
+const adRoutes = require("./src/routes/ads.routes");
 async function startServer() {
     if (!process.env.DB_CA) {
     throw new Error("DB_CA is missing");
@@ -66,8 +68,6 @@ app.use((req, res, next) => {
     res.setHeader("Permissions-Policy", "geolocation=(self)");
     next();
 });
-// Google Sheets snapshots are intentionally larger than normal API payloads.
-app.use("/api/sync", express.json({ limit: "20mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -95,35 +95,14 @@ app.use(express.static(path.join(__dirname, "public")));
     });
 
     app.use("/api/auth", authRoutes);
-    app.use("/api/my-data", myDataRoutes);
     app.use("/api/companies", companyRoutes);
-    app.use("/api/sync", sheetsSyncRoutes);
     app.use("/api/dashboard", dashboardRoutes);
     app.use("/api/visits", visitRoutes);
+    app.use("/api/activities", brokerActivityRoutes);
+    app.use("/api/teams", teamRoutes);
+    app.use("/api/users", userRoutes);
+    app.use("/api/ads", adRoutes);
 
-    app.get("/api/sync/google-sheet/status", async (req, res, next) => {
-    try {
-        const count = await req.prisma.googleSheetRecord.count();
-
-        const latestRecord = await req.prisma.googleSheetRecord.findFirst({
-            orderBy: {
-                syncedAt: "desc"
-            },
-            select: {
-                syncedAt: true
-            }
-        });
-
-        return res.json({
-            success: true,
-            recordsCount: count,
-            lastSyncedAt: latestRecord?.syncedAt ?? null
-        });
-
-    } catch (error) {
-        next(error);
-    }
-    });
 
     app.use((req, res) => {
         res.status(404).json({
