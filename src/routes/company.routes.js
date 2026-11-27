@@ -7,7 +7,7 @@ router.use(authenticateToken);
 async function getVisibleSalesIds(prisma, user) {
     if (user.role === "OPERATION_DIRECTOR") {
         const users = await prisma.user.findMany({
-            where: { role: "SALES_MAN", isActive: true },
+            where: { role: "SALES_MAN" },
             select: { id: true }
         });
         return users.map(item => item.id);
@@ -15,7 +15,7 @@ async function getVisibleSalesIds(prisma, user) {
     if (user.role === "SALES_MANAGER") {
         const teams = await prisma.team.findMany({
             where: { managerId: user.id, isActive: true },
-            select: { members: { where: { role: "SALES_MAN", isActive: true }, select: { id: true } } }
+            select: { members: { where: { role: "SALES_MAN" }, select: { id: true } } }
         });
         return teams.flatMap(team => team.members.map(member => member.id));
     }
