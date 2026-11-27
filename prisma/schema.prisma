@@ -1,0 +1,219 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum UserRole {
+  OPERATION_DIRECTOR
+  SALES_MANAGER
+  SALES_MAN
+}
+
+enum VisitSource {
+  DIRECT
+  INDIRECT
+}
+
+enum VisitStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ActivityType {
+  ORIENTATION
+  WORKSHOP
+}
+
+enum ActivityStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  fullName     String
+  email        String   @unique
+  passwordHash String
+  phone        String?
+  role         UserRole @default(SALES_MAN)
+  teamId       String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  team           Team?          @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
+  managedTeams   Team[]         @relation("TeamManager")
+  createdVisits  Visit[]        @relation("VisitCreator")
+  orientations   Orientation[]
+  createdCompanies Company[]    @relation("CompanyCreator")
+  createdClients Client[]       @relation("ClientCreator")
+  clientSources  ClientSource[]
+  ads            Ad[]
+  authSessions   AuthSession[]
+
+  @@index([teamId, role])
+  @@map("User")
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String   @db.VarChar(120)
+  managerId String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  updatedAt DateTime @updatedAt @db.DateTime(3)
+
+  manager User   @relation("TeamManager", fields: [managerId], references: [id], onDelete: Restrict)
+  members User[] @relation("TeamMembers")
+
+  @@unique([managerId, name])
+  @@index([managerId, isActive])
+  @@map("team")
+}
+
+model Company {
+  id             String   @id @default(cuid())
+  name           String   @db.VarChar(255)
+  normalizedName String   @db.VarChar(255)
+  createdById    String?
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt @db.DateTime(3)
+
+  createdBy   User?        @relation("CompanyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  orientations Orientation[]
+
+  @@index([createdById])
+  @@index([normalizedName])
+  @@map("company")
+}
+
+model Client {
+  id          String   @id @default(cuid())
+  name        String   @db.VarChar(150)
+  phone       String?  @db.VarChar(40)
+  email       String?  @db.VarChar(255)
+  createdById String
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @db.DateTime(3)
+
+  createdBy User    @relation("ClientCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  visits    Visit[]
+
+  @@index([createdById, phone])
+  @@index([name])
+  @@map("client")
+}
+
+model ClientSource {
+  id          String   @id @default(cuid())
+  createdById String
+  sourceType  String   @db.VarChar(80)
+  name        String   @db.VarChar(150)
+  phone       String?  @db.VarChar(40)
+  details     String?  @db.Text
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+
+  createdBy User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  visits    Visit[]
+
+  @@index([createdById, sourceType])
+  @@index([name])
+  @@map("client_source")
+}
+
+model Visit {
+  id              String      @id @default(cuid())
+  salesId         String
+  clientId        String
+  source          VisitSource
+  clientSourceId  String
+  startedAt       DateTime    @db.DateTime(3)
+  endedAt         DateTime?   @db.DateTime(3)
+  startLatitude   Decimal     @db.Decimal(10, 7)
+  startLongitude  Decimal     @db.Decimal(10, 7)
+  endLatitude     Decimal?    @db.Decimal(10, 7)
+  endLongitude    Decimal?    @db.Decimal(10, 7)
+  status          VisitStatus @default(IN_PROGRESS)
+  notes           String?     @db.Text
+  createdAt       DateTime    @default(now()) @db.DateTime(3)
+
+  sales       User         @relation("VisitCreator", fields: [salesId], references: [id], onDelete: Restrict)
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  clientSource ClientSource @relation(fields: [clientSourceId], references: [id], onDelete: Restrict)
+
+  @@index([salesId, status, startedAt])
+  @@index([clientId, startedAt])
+  @@index([clientSourceId])
+  @@map("visit")
+}
+
+model Orientation {
+  id           String         @id @default(cuid())
+  salesId      String
+  companyId    String
+  activityType ActivityType
+  brokerAdmin  String         @db.VarChar(150)
+  startedAt    DateTime       @default(now()) @db.DateTime(3)
+  endedAt      DateTime?      @db.DateTime(3)
+  startLatitude  Decimal?     @db.Decimal(10, 7)
+  startLongitude Decimal?     @db.Decimal(10, 7)
+  endLatitude    Decimal?     @db.Decimal(10, 7)
+  endLongitude   Decimal?     @db.Decimal(10, 7)
+  status       ActivityStatus @default(IN_PROGRESS)
+  createdAt    DateTime       @default(now()) @db.DateTime(3)
+
+  sales   User    @relation(fields: [salesId], references: [id], onDelete: Restrict)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([salesId, activityType, status, createdAt])
+  @@index([companyId, activityType, status])
+  @@map("orientation")
+}
+
+model Ad {
+  id        String   @id @default(cuid())
+  salesId   String
+  link      String   @db.VarChar(2048)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+
+  sales User @relation(fields: [salesId], references: [id], onDelete: Restrict)
+
+  @@index([salesId, createdAt])
+  @@map("ad")
+}
+
+model AuthSession {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String    @unique @db.VarChar(128)
+  expiresAt        DateTime  @db.DateTime(3)
+  revokedAt        DateTime? @db.DateTime(3)
+  lastUsedAt       DateTime? @db.DateTime(3)
+  createdAt        DateTime  @default(now()) @db.DateTime(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@map("auth_session")
+}
+
+model CompanyDropdown {
+  id          Int      @id @default(autoincrement())
+  dropdownId  String?  @db.VarChar(100)
+  companyName String   @db.VarChar(255)
+  salesAgent  String?  @db.VarChar(255)
+  email       String?  @db.VarChar(255)
+  syncedAt    DateTime @default(now()) @db.DateTime(3)
+
+  @@index([dropdownId])
+  @@index([email])
+  @@index([companyName])
+  @@map("company_dropdown")
+}
