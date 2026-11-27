@@ -81,7 +81,7 @@ model Team {
 model Company {
   id             String   @id @default(cuid())
   name           String   @db.VarChar(255)
-  normalizedName String   @unique @db.VarChar(255)
+  normalizedName String   @db.VarChar(255)
   createdById    String?
   createdAt      DateTime @default(now()) @db.DateTime(3)
   updatedAt      DateTime @updatedAt @db.DateTime(3)
@@ -90,6 +90,7 @@ model Company {
   orientations Orientation[]
 
   @@index([createdById])
+  @@index([normalizedName])
   @@map("company")
 }
 
@@ -161,6 +162,10 @@ model Orientation {
   brokerAdmin  String         @db.VarChar(150)
   startedAt    DateTime       @default(now()) @db.DateTime(3)
   endedAt      DateTime?      @db.DateTime(3)
+  startLatitude  Decimal?     @db.Decimal(10, 7)
+  startLongitude Decimal?     @db.Decimal(10, 7)
+  endLatitude    Decimal?     @db.Decimal(10, 7)
+  endLongitude   Decimal?     @db.Decimal(10, 7)
   status       ActivityStatus @default(IN_PROGRESS)
   createdAt    DateTime       @default(now()) @db.DateTime(3)
 

@@ -1,5 +1,6 @@
 const clean = value => value == null ? null : String(value).trim() || null;
 const normalize = value => String(value || "").normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+const DIRECT_SOURCE_TYPES = new Set(["CRM", "REFERRAL", "PERSONAL", "FREELANCER"]);
 
 function httpError(status, message) {
     const error = new Error(message);
@@ -80,7 +81,8 @@ function normalizeVisitInput(input = {}) {
     const clientEmail = clean(input.clientEmail);
     const source = String(input.source || "").trim().toUpperCase();
     const clientSourceId = clean(input.clientSourceId);
-    const sourceType = clean(input.sourceDetails?.sourceType);
+    const sourceTypeInput = clean(input.sourceDetails?.sourceType);
+    const sourceType = sourceTypeInput ? sourceTypeInput.toUpperCase() : null;
     const sourceName = clean(input.sourceDetails?.name);
     const sourcePhone = clean(input.sourceDetails?.phone);
     const sourceDetails = clean(input.sourceDetails?.details);
@@ -101,8 +103,8 @@ function normalizeVisitInput(input = {}) {
 
     if (source === "DIRECT") {
         if (clientSourceId) throw httpError(400, "Direct visits must submit new source details, not a source ID");
-        if (!sourceType || sourceType.length > 80 || !sourceName || sourceName.length > 150) {
-            throw httpError(400, "Direct visits require source type and source name");
+        if (!sourceType || !DIRECT_SOURCE_TYPES.has(sourceType) || !sourceName || sourceName.length > 150) {
+            throw httpError(400, "Direct visits require a supported source type (CRM, REFERRAL, PERSONAL, FREELANCER) and source name");
         }
         if (sourcePhone && sourcePhone.length > 40) {
             throw httpError(400, "Source phone must not exceed 40 characters");
@@ -266,6 +268,7 @@ module.exports = {
     getVisitOptions,
     normalizeVisitInput,
     parseCoordinate,
+    DIRECT_SOURCE_TYPES,
     startVisit,
     completeVisit
 };
