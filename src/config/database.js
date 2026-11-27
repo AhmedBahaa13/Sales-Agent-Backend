@@ -8,7 +8,8 @@ function normalizeCaCertificate(value) {
     const ca = value
         .trim()
         .replace(/\r\n/g, "\n")
-        .replace(/\\r?\\n/g, "\n");
+        .replace(/\\r\\n/g, "\n")
+        .replace(/\\n/g, "\n");
 
     if (
         !ca.includes("-----BEGIN CERTIFICATE-----") ||
