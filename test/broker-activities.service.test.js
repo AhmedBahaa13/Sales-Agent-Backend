@@ -125,3 +125,22 @@ test("activity completion rejects missing GPS coordinates", async () => {
         endLatitude: null, endLongitude: 31.24
     }), e => e.status === 400);
 });
+
+test("activity options preserve distinct company records with identical names", async () => {
+    const records = [
+        { companyId: "company-1", company: { id: "company-1", name: "Nile Developments" }, startedAt: new Date("2026-11-01T09:00:00Z"), brokerAdmin: "Admin A" },
+        { companyId: "company-2", company: { id: "company-2", name: "Nile Developments" }, startedAt: new Date("2026-11-02T09:00:00Z"), brokerAdmin: "Admin B" }
+    ];
+    const prisma = {
+        user: { findUnique: async () => ({ id: "sales-1", role: "SALES_MAN", isActive: true }) },
+        orientation: {
+            findMany: async ({ where }) => where.status === "COMPLETED" ? records : records
+        }
+    };
+    const { getBrokerActivityOptions } = require("../src/services/broker-activities.service");
+    const options = await getBrokerActivityOptions(prisma, "sales-1");
+    assert.equal(options.companies.length, 2);
+    assert.deepEqual(options.companies.map(item => item.id), ["company-1", "company-2"]);
+    assert.deepEqual(options.companies.map(item => item.companyName), ["Nile Developments", "Nile Developments"]);
+    assert.equal(options.eligibleBrokers.length, 2);
+});

@@ -89,7 +89,7 @@ async function getBrokerActivityOptions(prisma, userId) {
         if (!uniqueCompanies.has(item.companyId)) {
             uniqueCompanies.set(item.companyId, {
                 id: item.company.id,
-                name: item.company.name
+                companyName: item.company.name
             });
         }
     }
