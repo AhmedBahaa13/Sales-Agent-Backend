@@ -10,24 +10,30 @@ datasource db {
   provider = "mysql"
 }
 
-enum CompanyRole {
-  OWNER
-  ADMIN
-  MANAGER
-  AGENT
+enum UserRole {
+  OPERATION_DIRECTOR
+  SALES_MANAGER
+  SALES_MAN
 }
 
-enum TeamRole {
-  TEAM_LEAD
-  MEMBER
+enum VisitSource {
+  DIRECT
+  INDIRECT
 }
 
 enum VisitStatus {
-  SCHEDULED
   IN_PROGRESS
   COMPLETED
-  CANCELLED
-  NO_SHOW
+}
+
+enum ActivityType {
+  ORIENTATION
+  WORKSHOP
+}
+
+enum ActivityStatus {
+  IN_PROGRESS
+  COMPLETED
 }
 
 model User {
@@ -36,143 +42,161 @@ model User {
   email        String   @unique
   passwordHash String
   phone        String?
+  role         UserRole @default(SALES_MAN)
+  teamId       String?
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  memberships     CompanyMember[]
-  teamMemberships TeamMember[]
-  createdVisits   Visit[]           @relation("VisitCreator")
-  assignments     VisitAssignment[]
-  brokerActivities BrokerActivity[]
-}
+  team           Team?          @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
+  managedTeams   Team[]         @relation("TeamManager")
+  createdVisits  Visit[]        @relation("VisitCreator")
+  orientations   Orientation[]
+  createdCompanies Company[]    @relation("CompanyCreator")
+  createdClients Client[]       @relation("ClientCreator")
+  clientSources  ClientSource[]
+  ads            Ad[]
+  authSessions   AuthSession[]
 
-model Company {
-  id        String   @id @default(cuid())
-  name      String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  members CompanyMember[]
-  teams   Team[]
-  visits  Visit[]
-}
-
-model CompanyMember {
-  id        String      @id @default(cuid())
-  companyId String
-  userId    String
-  role      CompanyRole @default(AGENT)
-  createdAt DateTime    @default(now())
-
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([companyId, userId])
-  @@index([userId])
+  @@index([teamId, role])
+  @@map("User")
 }
 
 model Team {
   id        String   @id @default(cuid())
-  companyId String
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  name      String   @db.VarChar(120)
+  managerId String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  updatedAt DateTime @updatedAt @db.DateTime(3)
 
-  company Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  members TeamMember[]
-  visits  Visit[]
+  manager User   @relation("TeamManager", fields: [managerId], references: [id], onDelete: Restrict)
+  members User[] @relation("TeamMembers")
 
-  @@unique([companyId, name])
-  @@index([companyId])
+  @@unique([managerId, name])
+  @@index([managerId, isActive])
+  @@map("team")
 }
 
-model TeamMember {
-  teamId   String
-  userId   String
-  role     TeamRole @default(MEMBER)
-  joinedAt DateTime @default(now())
+model Company {
+  id             String   @id @default(cuid())
+  name           String   @db.VarChar(255)
+  normalizedName String   @unique @db.VarChar(255)
+  createdById    String?
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt @db.DateTime(3)
 
-  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy   User?        @relation("CompanyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  orientations Orientation[]
 
-  @@id([teamId, userId])
-  @@index([userId])
+  @@index([createdById])
+  @@map("company")
+}
+
+model Client {
+  id          String   @id @default(cuid())
+  name        String   @db.VarChar(150)
+  phone       String?  @db.VarChar(40)
+  email       String?  @db.VarChar(255)
+  createdById String
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @db.DateTime(3)
+
+  createdBy User    @relation("ClientCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  visits    Visit[]
+
+  @@index([createdById, phone])
+  @@index([name])
+  @@map("client")
+}
+
+model ClientSource {
+  id          String   @id @default(cuid())
+  createdById String
+  sourceType  String   @db.VarChar(80)
+  name        String   @db.VarChar(150)
+  phone       String?  @db.VarChar(40)
+  details     String?  @db.Text
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+
+  createdBy User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  visits    Visit[]
+
+  @@index([createdById, sourceType])
+  @@index([name])
+  @@map("client_source")
 }
 
 model Visit {
-  id          String  @id @default(cuid())
-  companyId   String
-  teamId      String?
-  createdById String
+  id              String      @id @default(cuid())
+  salesId         String
+  clientId        String
+  source          VisitSource
+  clientSourceId  String
+  startedAt       DateTime    @db.DateTime(3)
+  endedAt         DateTime?   @db.DateTime(3)
+  startLatitude   Decimal     @db.Decimal(10, 7)
+  startLongitude  Decimal     @db.Decimal(10, 7)
+  endLatitude     Decimal?    @db.Decimal(10, 7)
+  endLongitude    Decimal?    @db.Decimal(10, 7)
+  status          VisitStatus @default(IN_PROGRESS)
+  notes           String?     @db.Text
+  createdAt       DateTime    @default(now()) @db.DateTime(3)
 
-  clientName      String
-  clientPhone     String?
-  propertyName    String?
-  propertyAddress String
+  sales       User         @relation("VisitCreator", fields: [salesId], references: [id], onDelete: Restrict)
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  clientSource ClientSource @relation(fields: [clientSourceId], references: [id], onDelete: Restrict)
 
-  latitude  Decimal? @db.Decimal(10, 7)
-  longitude Decimal? @db.Decimal(10, 7)
-
-  startedAt      DateTime? @db.DateTime(3)
-  endedAt        DateTime? @db.DateTime(3)
-  startLatitude  Decimal?  @db.Decimal(10, 7)
-  startLongitude Decimal?  @db.Decimal(10, 7)
-  endLatitude    Decimal?  @db.Decimal(10, 7)
-  endLongitude   Decimal?  @db.Decimal(10, 7)
-
-  scheduledAt DateTime
-  status      VisitStatus @default(SCHEDULED)
-  notes       String?     @db.Text
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  team      Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  createdBy User    @relation("VisitCreator", fields: [createdById], references: [id], onDelete: Restrict)
-
-  assignments VisitAssignment[]
-
-  @@index([companyId, scheduledAt])
-  @@index([teamId, scheduledAt])
-  @@index([createdById])
-  @@index([status, scheduledAt])
+  @@index([salesId, status, startedAt])
+  @@index([clientId, startedAt])
+  @@index([clientSourceId])
+  @@map("visit")
 }
 
-model VisitAssignment {
-  visitId    String
-  userId     String
-  assignedAt DateTime @default(now())
+model Orientation {
+  id           String         @id @default(cuid())
+  salesId      String
+  companyId    String
+  activityType ActivityType
+  brokerAdmin  String         @db.VarChar(150)
+  startedAt    DateTime       @default(now()) @db.DateTime(3)
+  endedAt      DateTime?      @db.DateTime(3)
+  status       ActivityStatus @default(IN_PROGRESS)
+  createdAt    DateTime       @default(now()) @db.DateTime(3)
 
-  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sales   User    @relation(fields: [salesId], references: [id], onDelete: Restrict)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
-  @@id([visitId, userId])
-  @@index([userId])
+  @@index([salesId, activityType, status, createdAt])
+  @@index([companyId, activityType, status])
+  @@map("orientation")
 }
 
-model GoogleSheetRecord {
-  id          Int      @id @default(autoincrement())
-  serial      String?  @db.VarChar(100)
-  sourceId    String?  @db.VarChar(100)
-  team        String?  @db.VarChar(255)
-  team1       String?  @db.VarChar(255)
-  team2       String?  @db.VarChar(255)
-  team3       String?  @db.VarChar(255)
-  team4       String?  @db.VarChar(255)
-  team5       String?  @db.VarChar(255)
-  managers    String?  @db.Text
-  salesAgent  String?  @db.VarChar(255)
-  email       String?  @db.VarChar(255)
-  companyName String?  @db.VarChar(255)
-  groupName   String?  @db.VarChar(255)
-  syncedAt    DateTime @default(now()) @db.DateTime(3)
+model Ad {
+  id        String   @id @default(cuid())
+  salesId   String
+  link      String   @db.VarChar(2048)
+  createdAt DateTime @default(now()) @db.DateTime(3)
 
-  @@index([sourceId])
-  @@index([email])
-  @@index([companyName])
-  @@map("google_sheet_record")
+  sales User @relation(fields: [salesId], references: [id], onDelete: Restrict)
+
+  @@index([salesId, createdAt])
+  @@map("ad")
+}
+
+model AuthSession {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String    @unique @db.VarChar(128)
+  expiresAt        DateTime  @db.DateTime(3)
+  revokedAt        DateTime? @db.DateTime(3)
+  lastUsedAt       DateTime? @db.DateTime(3)
+  createdAt        DateTime  @default(now()) @db.DateTime(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@map("auth_session")
 }
 
 model CompanyDropdown {
@@ -187,23 +211,4 @@ model CompanyDropdown {
   @@index([email])
   @@index([companyName])
   @@map("company_dropdown")
-}
-
-
-model BrokerActivity {
-  id            String   @id @default(cuid())
-  userId        String
-  activityType  String   @db.VarChar(32)
-  brokerType    String?  @db.VarChar(32)
-  companyName   String   @db.VarChar(255)
-  brokerAdmin   String   @db.VarChar(150)
-  requestNumber String?  @db.VarChar(100)
-  createdAt     DateTime @default(now()) @db.DateTime(3)
-  updatedAt     DateTime @updatedAt @db.DateTime(3)
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, activityType, createdAt])
-  @@index([companyName])
-  @@map("broker_activity")
 }
