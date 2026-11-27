@@ -93,12 +93,12 @@
     $("loginView").classList.remove("hidden");
   }
   async function logout(){
-    const token=state.token;
-    if(token){
+    if(state.token && state.refreshToken){
       try{
+        await refreshSession();
         await fetch("/api/auth/logout",{
           method:"POST",
-          headers:{Authorization:"Bearer "+token}
+          headers:{Authorization:"Bearer "+state.token}
         });
       }catch(_){}
     }
