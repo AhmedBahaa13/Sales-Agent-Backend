@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { executeMigrationStatement } = require("../scripts/migrate");
+const { executeMigrationStatement, assertDestructiveMigrationCanStart } = require("../scripts/migrate");
 
 function fakeConnection({ columns = [], constraints = [], indexes = [] } = {}) {
     const queries = [];
@@ -21,6 +21,29 @@ function fakeConnection({ columns = [], constraints = [], indexes = [] } = {}) {
         }
     };
 }
+
+test("destructive migration can start on an untouched legacy User table", async () => {
+    const connection = { query: async () => [] };
+    await assert.doesNotReject(() => assertDestructiveMigrationCanStart(
+        connection,
+        "20261127_sales_client_domain.sql",
+        "DROP TABLE IF EXISTS Visit; ALTER TABLE User ADD COLUMN role VARCHAR(32)"
+    ));
+});
+
+test("destructive migration blocks an automatic retry after rollout columns exist", async () => {
+    const connection = {
+        query: async () => [{ COLUMN_NAME: "role" }, { COLUMN_NAME: "teamId" }]
+    };
+    await assert.rejects(
+        () => assertDestructiveMigrationCanStart(
+            connection,
+            "20261127_sales_client_domain.sql",
+            "DROP TABLE IF EXISTS Visit; ALTER TABLE User ADD COLUMN role VARCHAR(32)"
+        ),
+        /Refusing to rerun destructive migration/
+    );
+});
 
 test("migration skips a column that already exists", async () => {
     const connection = fakeConnection({ columns: ["startedAt"] });
