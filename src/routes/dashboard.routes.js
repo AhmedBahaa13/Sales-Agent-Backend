@@ -190,13 +190,22 @@ router.get("/overview", async (req, res, next) => {
             email: item.sales.email
         }));
 
+        const adActivityRows = adRecords.map(item => ({
+            ...item,
+            recordType: "AD",
+            activityType: "AD",
+            startedAt: item.createdAt,
+            scheduledAt: item.createdAt,
+            createdBy: item.salesAgent
+        }));
         const combinedRecent = [
             ...databaseVisits,
             ...appActivities.map(item => ({
                 ...item,
                 scheduledAt: item.startedAt,
                 createdBy: item.salesAgent
-            }))
+            })),
+            ...adActivityRows
         ].sort((a, b) => new Date(b.startedAt || b.createdAt || 0) - new Date(a.startedAt || a.createdAt || 0));
 
         const teamPayload = teams.map(team => ({
