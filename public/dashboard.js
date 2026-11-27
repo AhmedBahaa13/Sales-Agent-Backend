@@ -279,111 +279,64 @@
     });
   }
   function applyActivityMode(){
-    const type=$("activityType").value;
-    const brokerType=$("brokerType").value;
-    const isOrientation=type==="ORIENTATION";
-    $("brokerTypeGroup").classList.toggle("hidden",!isOrientation);
-    $("newCompanyGroup").classList.toggle("hidden",!isOrientation||brokerType!=="NEW_BROKER");
-    $("existingCompanyGroup").classList.toggle("hidden",!isOrientation||brokerType!=="EXISTING_BROKER");
+    const isOrientation=$("activityType").value==="ORIENTATION";
+    $("newCompanyGroup").classList.toggle("hidden",!isOrientation);
     $("eligibleBrokerGroup").classList.toggle("hidden",isOrientation);
-    $("newCompanyName").required=isOrientation&&brokerType==="NEW_BROKER";
-    $("existingCompany").required=isOrientation&&brokerType==="EXISTING_BROKER";
+    $("newCompanyName").required=isOrientation;
     $("eligibleBroker").required=!isOrientation;
     renderActivityCompanyOptions();
     updateActivitySubmitState();
   }
   function updateActivitySubmitState(){
     if(!activityOptionsCache){$("saveActivityBtn").disabled=true;return;}
-    const type=$("activityType").value;
-    const brokerType=$("brokerType").value;
-    const companyName=type==="WORKSHOP"
-      ? $("eligibleBroker").value
-      : brokerType==="NEW_BROKER"
-        ? $("newCompanyName").value.trim()
-        : $("existingCompany").value;
+    const isOrientation=$("activityType").value==="ORIENTATION";
+    const companyName=isOrientation ? $("newCompanyName").value.trim() : $("eligibleBroker").value;
     $("saveActivityBtn").disabled=!companyName||!$("brokerAdmin").value.trim();
   }
   function renderActivityCompanyOptions(){
     if(!activityOptionsCache)return;
-    const companyQuery=$("companySearch").value.trim().toLowerCase();
     const eligibleQuery=$("eligibleSearch").value.trim().toLowerCase();
-    const companies=(activityOptionsCache.companies||[]).filter(item=>String(item.name).toLowerCase().includes(companyQuery));
     const eligible=(activityOptionsCache.eligibleBrokers||[]).filter(item=>String(item.companyName).toLowerCase().includes(eligibleQuery));
-    fillActivitySelect($("existingCompany"),companies,"name");
     fillActivitySelect($("eligibleBroker"),eligible,"companyName");
-    if(activityOptionsCache.legacyHistoryStatus==="unavailable"&&!eligible.length){
-      $("eligibleEmpty").textContent=activityOptionsCache.legacyHistoryMessage||t("noEligibleBrokers");
-      $("eligibleEmpty").classList.remove("hidden");
-    }else{
-      $("eligibleEmpty").textContent=t("noEligibleBrokers");
-      $("eligibleEmpty").classList.toggle("hidden",eligible.length>0);
-    }
+    $("eligibleEmpty").textContent=t("noEligibleBrokers");
+    $("eligibleEmpty").classList.toggle("hidden",eligible.length>0);
     updateActivitySubmitState();
   }
   async function loadActivityOptions(){
     $("activityFormError").textContent="";
     $("saveActivityBtn").disabled=true;
-    try{
-      activityOptionsCache=await api("/api/activities/options");
-      applyActivityMode();
-      updateActivitySubmitState();
-    }catch(error){
-      $("activityFormError").textContent=error.message||t("networkError");
-    }
+    try{activityOptionsCache=await api("/api/activities/options");applyActivityMode();updateActivitySubmitState();}
+    catch(error){$("activityFormError").textContent=error.message||t("networkError");}
   }
   async function openActivityDialog(){
     $("activityForm").reset();
     $("activityType").value="ORIENTATION";
-    $("brokerType").value="NEW_BROKER";
     $("activityFormError").textContent="";
     activityOptionsCache=null;
     applyActivityMode();
     $("activityDialog").showModal();
     await loadActivityOptions();
   }
-  function closeActivityDialog(){
-    if($("activityDialog").open)$("activityDialog").close();
-  }
+  function closeActivityDialog(){if($("activityDialog").open)$("activityDialog").close();}
   async function saveActivity(event){
     event.preventDefault();
     $("activityFormError").textContent="";
     if(!$("activityForm").reportValidity())return;
     const activityType=$("activityType").value;
-    const brokerType=$("brokerType").value;
-    const companyName=activityType==="WORKSHOP"
-      ? $("eligibleBroker").value
-      : brokerType==="NEW_BROKER"
-        ? $("newCompanyName").value.trim()
-        : $("existingCompany").value;
-    if(!companyName){
-      $("activityFormError").textContent=activityType==="WORKSHOP"?t("noEligibleBrokers"):t("companyName");
-      return;
-    }
-    const body={
-      activityType,
-      brokerType:activityType==="ORIENTATION"?brokerType:null,
-      companyName,
-      brokerAdmin:$("brokerAdmin").value.trim(),
-      requestNumber:$("requestNumber").value.trim()||null
-    };
+    const companyName=activityType==="WORKSHOP"?$("eligibleBroker").value:$("newCompanyName").value.trim();
+    if(!companyName){$("activityFormError").textContent=activityType==="WORKSHOP"?t("noEligibleBrokers"):t("companyName");return;}
+    const body={activityType,companyName,brokerAdmin:$("brokerAdmin").value.trim()};
     const button=$("saveActivityBtn");
     button.disabled=true;
     button.textContent=state.language==="ar"?"جارٍ الحفظ…":"Saving…";
-    $("cancelActivityBtn").disabled=true;
-    $("closeActivityBtn").disabled=true;
+    $("cancelActivityBtn").disabled=true;$("closeActivityBtn").disabled=true;
     try{
       await api("/api/activities",{method:"POST",body:JSON.stringify(body)});
       closeActivityDialog();
-      toast(state.language==="ar"?"تم حفظ النشاط بنجاح":"Activity saved successfully");
+      toast(state.language==="ar"?"بدأ النشاط. أنهِه من قائمة الأنشطة عند الانتهاء.":"Activity started. Complete it from the activity list when finished.");
       await loadDashboard();
-    }catch(error){
-      $("activityFormError").textContent=error.message||t("networkError");
-    }finally{
-      button.textContent=t("saveActivity");
-      updateActivitySubmitState();
-      $("cancelActivityBtn").disabled=false;
-      $("closeActivityBtn").disabled=false;
-    }
+    }catch(error){$("activityFormError").textContent=error.message||t("networkError");}
+    finally{button.textContent=t("saveActivity");updateActivitySubmitState();$("cancelActivityBtn").disabled=false;$("closeActivityBtn").disabled=false;}
   }
   function populateRelations(relations){
     const select=$("relationshipFilter"),current=select.value;
@@ -402,12 +355,10 @@
   $("cancelActivityBtn").addEventListener("click",closeActivityDialog);
   $("activityForm").addEventListener("submit",saveActivity);
   $("activityType").addEventListener("change",applyActivityMode);
-  $("brokerType").addEventListener("change",applyActivityMode);
-  ["newCompanyName","existingCompany","eligibleBroker","brokerAdmin"].forEach(id=>{
+  ["newCompanyName","eligibleBroker","brokerAdmin"].forEach(id=>{
     $(id).addEventListener("input",updateActivitySubmitState);
     $(id).addEventListener("change",updateActivitySubmitState);
   });
-  $("companySearch").addEventListener("input",renderActivityCompanyOptions);
   $("eligibleSearch").addEventListener("input",renderActivityCompanyOptions);
   $("loginForm").addEventListener("submit",login);$("logoutBtn").addEventListener("click",logout);$("refreshBtn").addEventListener("click",()=>loadDashboard(true));$("periodFilter").addEventListener("change",()=>loadDashboard());$("companyFilter").addEventListener("change",()=>loadDashboard());$("relationshipFilter").addEventListener("change",()=>renderRelations(state.data?.relationships||{}));$("languageBtn").addEventListener("click",()=>setLanguage(state.language==="en"?"ar":"en"));
   setLanguage(state.language);
