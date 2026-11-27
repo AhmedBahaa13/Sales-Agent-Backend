@@ -5,7 +5,7 @@ const { createHash, randomBytes } = require("crypto");
 const { authenticateToken } = require("../middleware/auth.middleware");
 
 const router = express.Router();
-const ACCESS_TOKEN_TTL = "7d";
+const ACCESS_TOKEN_TTL = "15m";
 const REFRESH_TOKEN_DAYS = 30;
 
 function hashRefreshToken(token) {
@@ -35,7 +35,7 @@ async function createSession(prisma, userId) {
     return {
         token: createAccessToken(userId, session.id),
         refreshToken,
-        expiresIn: 7 * 24 * 60 * 60
+        expiresIn: 15 * 60
     };
 }
 
