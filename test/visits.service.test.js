@@ -93,6 +93,13 @@ function transactionPrisma(txOverrides = {}) {
     };
 }
 
+test("start and end coordinates reject missing values instead of treating them as zero", async () => {
+    const { parseCoordinate } = require("../src/services/visits.service");
+    assert.throws(() => parseCoordinate(null, -90, 90, "Latitude"), error => error.status === 400);
+    assert.throws(() => parseCoordinate("", -180, 180, "Longitude"), error => error.status === 400);
+    assert.equal(parseCoordinate("0", -90, 90, "Latitude"), 0);
+});
+
 test("direct visit requires source type and source name", () => {
     assert.throws(
         () => normalizeVisitInput({

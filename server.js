@@ -1,6 +1,7 @@
 
 require("dotenv").config();
 const path = require("path");
+const { getDatabaseConnectionOptions } = require("./src/config/database");
 const express = require("express");
 const authRoutes = require("./src/routes/auth.routes");
 const companyRoutes = require("./src/routes/company.routes");
@@ -30,28 +31,13 @@ async function startServer() {
         import("./dist/generated/prisma/client.js")
     ]);
 
-    const dbUrl = new URL(process.env.DATABASE_URL);
-const ca = process.env.DB_CA?.replace(/\\n/g, "\n");
-
-if (!ca || !ca.includes("-----BEGIN CERTIFICATE-----") || !ca.includes("-----END CERTIFICATE-----")) {
-    throw new Error("DB_CA is missing or invalid");
-}
-   
-
-const adapter = new PrismaMariaDb({
-    host: dbUrl.hostname,
-    port: Number(dbUrl.port || 3306),
-    user: decodeURIComponent(dbUrl.username),
-    password: decodeURIComponent(dbUrl.password),
-    database: decodeURIComponent(dbUrl.pathname.slice(1)),
-    ssl: {
-        ca,
-        rejectUnauthorized: true
-    },
-    connectionLimit: 5,
-    acquireTimeout: 30000,
-    connectTimeout: 30000
-});
+    const databaseOptions = getDatabaseConnectionOptions();
+    const adapter = new PrismaMariaDb({
+        ...databaseOptions,
+        connectionLimit: 5,
+        acquireTimeout: 30000,
+        connectTimeout: 30000
+    });
 
     const prisma = new PrismaClient({ adapter });
     await prisma.$connect();

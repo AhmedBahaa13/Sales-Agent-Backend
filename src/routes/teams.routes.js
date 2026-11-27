@@ -99,9 +99,21 @@ router.post("/:teamId/members", allowRoles("SALES_MANAGER", "OPERATION_DIRECTOR"
             return res.status(409).json({ message: "This Sales Man already belongs to another team" });
         }
 
-        const updated = await req.prisma.user.update({
+        const assigned = await req.prisma.user.updateMany({
+            where: {
+                id: salesId,
+                role: "SALES_MAN",
+                isActive: true,
+                teamId: null
+            },
+            data: { teamId: team.id }
+        });
+        if (assigned.count !== 1) {
+            return res.status(409).json({ message: "This Sales Man was assigned to a team by another request. Refresh and try again." });
+        }
+
+        const updated = await req.prisma.user.findUnique({
             where: { id: salesId },
-            data: { teamId: team.id },
             select: { id: true, fullName: true, email: true, role: true, teamId: true }
         });
         return res.json({ success: true, member: updated });

@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, fix/production-readiness-phase1]
+    branches: [main, "fix/**", "feat/**"]
 
 permissions:
   contents: read
@@ -12,18 +12,19 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: mysql://ci:ci@127.0.0.1:3306/brokerflow_ci
+      DB_CA: "-----BEGIN CERTIFICATE-----\\nY2ktY2VydGlmaWNhdGU=\\n-----END CERTIFICATE-----"
+      JWT_SECRET: "ci-only-secret-that-is-at-least-sixty-four-characters-long-for-tests-only"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
-      - name: Generate and compile Prisma client
-        run: npm run build
-        env:
-          DATABASE_URL: mysql://user:password@localhost:3306/brokerflow_test
-      - run: npm run check:syntax
-      - run: npm test
+      - name: Run tests, syntax checks and Prisma ESM build
+        run: npm run check
       - name: Fail on high or critical dependency vulnerabilities
         run: npm run audit

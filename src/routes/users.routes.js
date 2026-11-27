@@ -50,7 +50,7 @@ router.post("/", allowRoles("OPERATION_DIRECTOR"), async (req, res, next) => {
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
             return res.status(400).json({ message: "Invalid email address" });
         }
-        if (password.length < 8 || password.length > 72) {
+        if (password.length < 8 || Buffer.byteLength(password, "utf8") > 72) {
             return res.status(400).json({ message: "Password must be between 8 and 72 characters" });
         }
         if (!["SALES_MANAGER", "SALES_MAN"].includes(normalizedRole)) {

@@ -2,29 +2,39 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const mariadb = require("mariadb");
+const { getDatabaseConnectionOptions } = require("../src/config/database");
 
 const MIGRATIONS_DIR = path.join(__dirname, "..", "database", "migrations");
 
 function getConnectionOptions() {
-    if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is missing");
-    if (!process.env.DB_CA) throw new Error("DB_CA is missing");
-
-    const url = new URL(process.env.DATABASE_URL);
-    const ca = process.env.DB_CA.replace(/\\\\n/g, "\n");
-    if (!ca.includes("-----BEGIN CERTIFICATE-----") || !ca.includes("-----END CERTIFICATE-----")) {
-        throw new Error("DB_CA is invalid");
-    }
-
     return {
-        host: url.hostname,
-        port: Number(url.port || 3306),
-        user: decodeURIComponent(url.username),
-        password: decodeURIComponent(url.password),
-        database: decodeURIComponent(url.pathname.slice(1)),
-        ssl: { ca, rejectUnauthorized: true },
+        ...getDatabaseConnectionOptions(),
         connectTimeout: 30000,
         acquireTimeout: 30000
     };
+}
+
+async function assertDestructiveMigrationCanStart(connection, file, sql) {
+    if (!/\bDROP\s+TABLE\b/i.test(sql)) return;
+
+    const partialRolloutColumns = await connection.query(
+        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS " +
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'User' " +
+        "AND COLUMN_NAME IN ('role', 'teamId')"
+    );
+
+    if (partialRolloutColumns.length > 0) {
+        const names = partialRolloutColumns
+            .map(row => row.COLUMN_NAME || row.column_name)
+            .filter(Boolean);
+
+        throw new Error(
+            "Refusing to rerun destructive migration " + file +
+            " because the User table already has rollout columns (" +
+            (names.join(", ") || "role/teamId") +
+            "). The previous migration may have partially completed. Inspect the database and resume manually; automatic rerun could delete new data."
+        );
+    }
 }
 
 async function executeMigrationStatement(connection, statement) {
@@ -90,7 +100,9 @@ async function run() {
             [migrationLockName]
         );
         migrationLockAcquired = Number(lockResult[0]?.acquired) === 1;
-        if (!migrationLockAcquired) throw new Error("Could not acquire the database migration lock");
+        if (!migrationLockAcquired) {
+            throw new Error("Could not acquire the database migration lock");
+        }
 
         await connection.query(
             "CREATE TABLE IF NOT EXISTS `brokerflow_migrations` (" +
@@ -99,7 +111,20 @@ async function run() {
             ") ENGINE=InnoDB"
         );
 
-        const files = fs.readdirSync(MIGRATIONS_DIR).filter(file => file.endsWith(".sql")).sort();
+        await connection.query(
+            "CREATE TABLE IF NOT EXISTS `brokerflow_migration_runs` (" +
+            "`id` VARCHAR(191) NOT NULL PRIMARY KEY, " +
+            "`status` ENUM('RUNNING','FAILED','APPLIED') NOT NULL, " +
+            "`startedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), " +
+            "`finishedAt` DATETIME(3) NULL, " +
+            "`errorMessage` VARCHAR(1000) NULL" +
+            ") ENGINE=InnoDB"
+        );
+
+        const files = fs.readdirSync(MIGRATIONS_DIR)
+            .filter(file => file.endsWith(".sql"))
+            .sort();
+
         for (const file of files) {
             const alreadyApplied = await connection.query(
                 "SELECT `id` FROM `brokerflow_migrations` WHERE `id` = ? LIMIT 1",
@@ -108,21 +133,52 @@ async function run() {
             if (alreadyApplied.length) continue;
 
             const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
-            const statements = sql
-                .replace(/^\s*--.*$/gm, "")
-                .split(";")
-                .map(statement => statement.trim())
-                .filter(Boolean);
-
-            for (const statement of statements) {
-                await executeMigrationStatement(connection, statement);
-            }
-
-            await connection.query(
-                "INSERT INTO `brokerflow_migrations` (`id`) VALUES (?)",
+            const priorRun = await connection.query(
+                "SELECT `status` FROM `brokerflow_migration_runs` WHERE `id` = ? LIMIT 1",
                 [file]
             );
-            console.log("Database migration applied: " + file);
+
+            if (priorRun.length && priorRun[0].status !== "APPLIED") {
+                throw new Error(
+                    "Migration " + file + " has a previous " + priorRun[0].status +
+                    " attempt. Automatic retry is blocked to protect partially migrated data."
+                );
+            }
+
+            await assertDestructiveMigrationCanStart(connection, file, sql);
+
+            await connection.query(
+                "INSERT INTO `brokerflow_migration_runs` (`id`, `status`) VALUES (?, 'RUNNING')",
+                [file]
+            );
+
+            try {
+                const statements = sql
+                    .replace(/^\s*--.*$/gm, "")
+                    .split(";")
+                    .map(statement => statement.trim())
+                    .filter(Boolean);
+
+                for (const statement of statements) {
+                    await executeMigrationStatement(connection, statement);
+                }
+
+                await connection.query(
+                    "INSERT INTO `brokerflow_migrations` (`id`) VALUES (?)",
+                    [file]
+                );
+                await connection.query(
+                    "UPDATE `brokerflow_migration_runs` SET `status` = 'APPLIED', `finishedAt` = CURRENT_TIMESTAMP(3), `errorMessage` = NULL WHERE `id` = ?",
+                    [file]
+                );
+                console.log("Database migration applied: " + file);
+            } catch (migrationError) {
+                await connection.query(
+                    "UPDATE `brokerflow_migration_runs` SET `status` = 'FAILED', `finishedAt` = CURRENT_TIMESTAMP(3), `errorMessage` = ? WHERE `id` = ?",
+                    [String(migrationError.message || migrationError).slice(0, 1000), file]
+                );
+                throw migrationError;
+            }
         }
     } finally {
         if (migrationLockAcquired) {
@@ -143,4 +199,9 @@ if (require.main === module) {
     });
 }
 
-module.exports = { executeMigrationStatement, getConnectionOptions, run };
+module.exports = {
+    assertDestructiveMigrationCanStart,
+    executeMigrationStatement,
+    getConnectionOptions,
+    run
+};
