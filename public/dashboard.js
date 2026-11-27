@@ -1,7 +1,14 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const state = { token: sessionStorage.getItem("brokerflow_token") || "", user: null, data: null, language: localStorage.getItem("brokerflow_language") || "en" };
+  const state = {
+    token: sessionStorage.getItem("brokerflow_token") || "",
+    refreshToken: sessionStorage.getItem("brokerflow_refresh_token") || "",
+    user: null,
+    data: null,
+    language: localStorage.getItem("brokerflow_language") || "en"
+  };
+  let refreshPromise = null;
   const words = {
     en: {
       visits:"visits",relationships:"relationships",meetings:"Meetings",orientations:"Orientations",workshops:"Workshops",ads:"Ads",addActivity:"Add activity",createRecord:"CREATE RECORD",activityType:"Activity type",orientation:"Orientation",workshop:"Workshop",brokerType:"Broker type",newBroker:"New Broker",existingBroker:"Existing Broker",companyName:"Company name",searchCompanies:"Search assigned companies",searchCompanyPlaceholder:"Search company name",assignedCompany:"Assigned company",eligibleBrokerHint:"Only brokers with at least one previous Orientation are shown.",searchEligible:"Search eligible brokers",searchEligiblePlaceholder:"Search broker name",eligibleBroker:"Eligible broker",noEligibleBrokers:"No eligible brokers yet. Record an Orientation first.",brokerAdmin:"Broker Admin",requestNumber:"Request Number (optional)",cancel:"Cancel",saveActivity:"Save activity",activityBreakdown:"Activity breakdown",activityBreakdownSub:"Meetings, visits, orientations, workshops and ads in the selected period",activityTrend:"Activity trend",activityTrendSub:"All recorded activities by month in the selected period",withinSelectedPeriod:"In the selected period",welcome:"Welcome back",loginSubtitle:"Sign in to explore your sales performance and business relationships.",email:"Email address",password:"Password",signIn:"Sign in",workspace:"WORKSPACE",overview:"Overview",relationships:"Relationships",visits:"Visits",signOut:"Sign out",workspaceOverview:"WORKSPACE OVERVIEW",dashboard:"Dashboard",analyticsFor:"Analytics for",allCompanies:"All companies",last7:"Last 7 days",last30:"Last 30 days",last90:"Last 90 days",last365:"Last 12 months",allTime:"All time",visitTrend:"My visit activity",visitTrendSub:"Your visits over the selected period",visitStatus:"My visit status",visitStatusSub:"Pending and completed visits",teamPerformance:"Visit duration",teamPerformanceSub:"How long completed visits take",visitDuration:"Visit duration",visitDurationSub:"Completed visits grouped by duration",myVisits:"My visits",myCompleted:"Completed",myPending:"Pending",averageDuration:"Average duration",topCompanies:"Top clients",topCompaniesSub:"Your visits by client",sourceTeams:"Teams in Google Sheets",sourceTeamsSub:"Current source relationships",agentActivity:"Sales agent activity",agentActivitySub:"Source records by sales agent",dataExplorer:"DATA EXPLORER",relationshipMap:"Relationship explorer",relationshipSub:"Explore how managers, agents, companies, teams and groups connect.",from:"FROM",to:"CONNECTED TO",records:"RECORDS",dataHealth:"Data health",dataHealthSub:"Missing fields in your source data",recentVisits:"Recent visits",recentVisitsSub:"Latest activity in your companies",footer:"Sales intelligence workspace",totalCompanies:"Companies",members:"Company members",teams:"Teams",totalVisits:"Visits in period",completed:"Completed visits",cancelled:"Cancelled visits",sourceRecords:"Source records",sourceCompanies:"Source companies",sourceAgents:"Sales agents",sourceManagers:"Sales managers",sourceTeamsKpi:"Source teams",sourceGroups:"Client groups",dropdownCompanies:"Dropdown companies",noData:"No data available for this selection",loading:"Loading dashboard…",loginFailed:"Unable to sign in. Check your credentials.",sessionExpired:"Your session expired. Please sign in again.",networkError:"Unable to load dashboard data. Please try again.",directMatches:"Direct email matches",agentMatches:"Sales Agent matches",missingEmail:"Records without email",missingAgent:"Records without Sales Agent",missingCompany:"Records without company",allRelationships:"All relationships",managerToAgents:"Manager → Sales Agents",managerToCompanies:"Manager → Companies",agentToCompanies:"Sales Agent → Companies",agentToEmails:"Sales Agent → Emails",emailToCompanies:"Email → Companies",companyToGroups:"Company → Client Groups",companyToTeams:"Company → Source Teams",teamToAgents:"Team → Sales Agents",managerToTeams:"Manager → Teams",groupToTeams:"Client Group → Teams",dropdownIdToCompany:"Dropdown ID → Company",dropdownAgentToCompany:"Dropdown Sales Agent → Company",companyToMembers:"Company → Members",companyToTeamsDb:"Company → App Teams",teamToMembersDb:"App Team → Members",teamToVisitsDb:"Team → Company visits",visitToCreator:"Company → Visit creators",visitToAssignees:"Company → Visit assignees",orientationCompanyToAgents:"Orientation company → Sales Agents",orientationAgentToManagers:"Orientation Sales Agent → Managers",orientationCompanyToBrokerAdmins:"Company → Broker Admins",orientationTypeToBrokerType:"Activity → Broker Type",orientationLocationInToOut:"Check-in → Check-out locations",orientationEmailToAgents:"Email → Sales Agents",orientationProjectToCompany:"Project ID → Company",orientationRequestToCompany:"Request → Company",managerVisits:"Visits by manager and team",managerVisitsSub:"All managers, teams, sales agents and their visits",unassignedSales:"Sales agents without a manager",noManagerFound:"No manager relationship was found for this sales agent.",noAdminHierarchy:"No manager or sales hierarchy data is available.",noRelationships:"No relationships found for this selection.",sourceData:"Google Sheets",noRecentVisits:"No recent visits in this period.",refresh:"Dashboard updated",lastSync:"Last sync",notSynced:"Sync time unavailable",unknown:"Unknown",scheduled:"Scheduled",inProgress:"Pending",completedStatus:"Completed",cancelledStatus:"Cancelled",noShow:"No show",unassigned:"Unassigned team",visitsCount:"visits",recordsCount:"records",createdBy:"Created by",direct:"Direct email",agentMatch:"Agent match",dataQuality:"Source data quality"
@@ -24,12 +31,49 @@
     document.querySelectorAll("[data-i18n]").forEach(el=>{const k=el.dataset.i18n;if(words[lang][k])el.textContent=words[lang][k];});document.querySelectorAll("[data-i18n-placeholder]").forEach(el=>{const k=el.dataset.i18nPlaceholder;if(words[lang][k])el.placeholder=words[lang][k];});
     if(state.data){renderDashboard(state.data);populateRelations(state.data.relationships||{});renderRelations(state.data.relationships||{});}
   }
+  async function refreshSession(){
+    if(!state.refreshToken)throw new Error("Refresh session is missing");
+    if(!refreshPromise){
+      refreshPromise=(async()=>{
+        const response=await fetch("/api/auth/refresh",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({refreshToken:state.refreshToken})
+        });
+        const body=await response.json().catch(()=>({}));
+        if(!response.ok||!body.token||!body.refreshToken){
+          throw new Error(body.message||"Refresh session expired");
+        }
+        state.token=body.token;
+        state.refreshToken=body.refreshToken;
+        sessionStorage.setItem("brokerflow_token",state.token);
+        sessionStorage.setItem("brokerflow_refresh_token",state.refreshToken);
+        return body;
+      })().finally(()=>{refreshPromise=null;});
+    }
+    return refreshPromise;
+  }
   async function api(path,options){
-    options=options||{};const headers=Object.assign({"Content-Type":"application/json"},options.headers||{});
-    if(state.token)headers.Authorization="Bearer "+state.token;
-    const response=await fetch(path,Object.assign({},options,{headers}));
+    options=options||{};
+    const headers=Object.assign({"Content-Type":"application/json"},options.headers||{});
+    const execute=()=>fetch(path,Object.assign({},options,{
+      headers:Object.assign({},headers,state.token?{Authorization:"Bearer "+state.token}:{})
+    }));
+    let response=await execute();
+    if(response.status===401 && path!=="/api/auth/login" && path!=="/api/auth/refresh"){
+      try{
+        await refreshSession();
+        response=await execute();
+      }catch(error){
+        clearSession();
+        throw new Error(t("sessionExpired"));
+      }
+    }
     const body=await response.json().catch(()=>({}));
-    if(response.status===401){logout();throw new Error(t("sessionExpired"));}
+    if(response.status===401){
+      clearSession();
+      throw new Error(t("sessionExpired"));
+    }
     if(!response.ok)throw new Error(body.message||("Request failed ("+response.status+")"));
     return body;
   }
@@ -38,10 +82,31 @@
     if(state.user){$("userName").textContent=state.user.fullName||"User";$("userEmail").textContent=state.user.email||"";$("userAvatar").textContent=(state.user.fullName||"U").trim().charAt(0).toUpperCase();}
     setLanguage(state.language);
   }
-  function logout(){state.token="";state.user=null;state.data=null;sessionStorage.removeItem("brokerflow_token");$("appView").classList.add("hidden");$("loginView").classList.remove("hidden");}
+  function clearSession(){
+    state.token="";
+    state.refreshToken="";
+    state.user=null;
+    state.data=null;
+    sessionStorage.removeItem("brokerflow_token");
+    sessionStorage.removeItem("brokerflow_refresh_token");
+    $("appView").classList.add("hidden");
+    $("loginView").classList.remove("hidden");
+  }
+  async function logout(){
+    const token=state.token;
+    if(token){
+      try{
+        await fetch("/api/auth/logout",{
+          method:"POST",
+          headers:{Authorization:"Bearer "+token}
+        });
+      }catch(_){}
+    }
+    clearSession();
+  }
   async function login(event){
     event.preventDefault();const button=$("loginForm").querySelector("button");$("loginError").textContent="";button.disabled=true;button.textContent=t("loading");
-    try{const result=await api("/api/auth/login",{method:"POST",body:JSON.stringify({email:$("email").value.trim(),password:$("password").value})});state.token=result.token;state.user=result.user;sessionStorage.setItem("brokerflow_token",state.token);showApp(result.user);await loadDashboard();}
+    try{const result=await api("/api/auth/login",{method:"POST",body:JSON.stringify({email:$("email").value.trim(),password:$("password").value})});state.token=result.token;state.refreshToken=result.refreshToken;state.user=result.user;sessionStorage.setItem("brokerflow_token",state.token);sessionStorage.setItem("brokerflow_refresh_token",state.refreshToken);showApp(result.user);await loadDashboard();}
     catch(err){$("loginError").textContent=err.message||t("loginFailed");}
     finally{button.disabled=false;button.textContent=t("signIn");}
   }
