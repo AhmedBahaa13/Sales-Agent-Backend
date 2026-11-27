@@ -1,5 +1,5 @@
 const clean = value => value == null ? null : String(value).trim() || null;
-const normalize = value => String(value || "").normalize("NFKC").trim().replace(/\\s+/g, " ").toLocaleLowerCase();
+const normalize = value => String(value || "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 
 function httpError(status, message) {
     const error = new Error(message);
