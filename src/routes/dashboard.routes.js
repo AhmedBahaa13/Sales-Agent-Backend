@@ -71,7 +71,11 @@ router.get("/overview", async (req, res, next) => {
                 include: {
                     manager: { select: { id: true, fullName: true } },
                     members: {
-                        where: { role: "SALES_MAN", isActive: true },
+                        where: {
+                            role: "SALES_MAN",
+                            isActive: true,
+                            ...(user.role === "SALES_MAN" ? { id: user.id } : {})
+                        },
                         select: { id: true, fullName: true, email: true, role: true, isActive: true }
                     }
                 },
