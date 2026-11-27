@@ -1,5 +1,5 @@
 const clean = value => value == null ? null : String(value).trim() || null;
-const normalize = value => String(value || "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+const normalize = value => String(value || "").normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
 
 function httpError(status, message) {
     const error = new Error(message);
@@ -8,6 +8,10 @@ function httpError(status, message) {
 }
 
 function parseCoordinate(value, min, max, fieldName) {
+    if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) {
+        throw httpError(400, fieldName + " is required");
+    }
+
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
         throw httpError(400, fieldName + " is invalid");
