@@ -1,5 +1,6 @@
 const clean = value => value == null ? null : String(value).trim() || null;
 const normalize = value => String(value || "").normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+const DIRECT_SOURCE_TYPES = new Set(["CRM", "REFERRAL", "PERSONAL", "FREELANCER"]);
 
 function httpError(status, message) {
     const error = new Error(message);
